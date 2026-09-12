@@ -1,0 +1,131 @@
+#ifndef VALUE_H
+#define VALUE_H
+
+#include <stdint.h>
+#include <stddef.h>
+
+typedef enum {
+    TAG_NONE,
+    TAG_INT,
+    TAG_FLOAT,
+    TAG_STRING,
+    TAG_LIST,
+    TAG_DICT,
+    TAG_SET,
+    TAG_FUNCTION,
+    TAG_BYTES,
+    TAG_TUPLE,
+} ValueTag;
+
+typedef struct Value Value;
+typedef struct Function Function;
+
+typedef struct DictEntry {
+    Value *key;
+    Value *value;
+} DictEntry;
+
+typedef struct DictObject {
+    DictEntry *entries;
+    uint32_t len;
+    uint32_t cap;
+} DictObject;
+
+typedef struct SetObject {
+    Value **items;
+    uint32_t len;
+    uint32_t cap;
+} SetObject;
+
+typedef struct BytesObject {
+    unsigned char *data;
+    uint32_t len;
+} BytesObject;
+
+typedef struct TupleObject {
+    Value **items;
+    uint32_t len;
+} TupleObject;
+
+struct Value {
+    ValueTag tag;
+    uint32_t refcount;
+
+    union {
+        int64_t int_val;
+        double float_val;
+        void *ptr;
+
+        struct {
+            char *data;
+            uint32_t len;
+        } str;
+
+        BytesObject bytes;
+
+        struct {
+            Value **items;
+            uint32_t len;
+            uint32_t cap;
+        } list;
+
+        TupleObject tuple;
+
+        DictObject dict;
+        SetObject set;
+
+        Function *func;
+    } data;
+};
+
+struct Function {
+    char *name;
+    uint16_t nlocals;
+    uint16_t nparams;
+    uint32_t code_len;
+    unsigned char *code;
+};
+
+Value *value_new_int(int64_t i);
+Value *value_new_float(double f);
+Value *value_new_string(const char *s);
+Value *value_new_string_len(const char *data, size_t len);
+Value *value_new_bytes(const unsigned char *data, size_t len);
+Value *value_new_tuple(size_t len);
+Value *value_new_list(void);
+Value *value_new_dict(void);
+Value *value_new_set(void);
+
+Value *value_retain(Value *v);
+void value_release(Value *v);
+
+int64_t value_as_int(const Value *v);
+double value_as_float(const Value *v);
+
+const char *value_as_string(const Value *v);
+size_t value_string_len(const Value *v);
+
+size_t value_bytes_len(const Value *v);
+const unsigned char *value_bytes_data(const Value *v);
+
+size_t value_list_len(const Value *v);
+Value *value_list_get(const Value *v, size_t idx);
+void value_list_set(Value *v, size_t idx, Value *item);
+int value_list_append(Value *list, Value *item);
+
+size_t value_tuple_len(const Value *v);
+Value *value_tuple_get(const Value *v, size_t idx);
+
+int value_dict_set(Value *dict, Value *key, Value *value);
+Value *value_dict_get(const Value *dict, Value *key);
+Value *value_dict_key_at(const Value *dict, size_t index);
+size_t value_dict_len(const Value *dict);
+
+int value_set_add(Value *set, Value *item);
+int value_set_contains(const Value *set, Value *item);
+size_t value_set_len(const Value *set);
+
+int value_compare(const Value *a, const Value *b);
+char *value_to_string(const Value *v);
+
+#endif
