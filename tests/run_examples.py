@@ -17,6 +17,13 @@ EXPECTED_OUTPUT = {
     "test_augassign.py": "15\n",
     "test_boolop.py": "1\n",
     "test_builtins.py": "52\n",
+    "test_builtin_values.py": "5\n1 2 3\n42!\nside\nNone\n2\n",
+    "test_callable_expr.py": "7\n-1\n5\n42\ntruthy\n<function add>\n<built-in function print>\nNone\n",
+    "test_shadow_builtin.py": "42\n99\nNone\n",
+    "test_kwargs.py": "Ada 36 London\nLinus 54 Helsinki\n8\n3\n7\n35\nNone\n",
+    "test_defaults.py": "Hello Ada!\nHello Ada?\nHello Bob.\n9\n15\n7\nempty\ngiven\n2\n12\n6\nNone\n",
+    "test_nested_iteration.py": "1x\n1y\n2x\n2y\n2\n1\n3\n3\n3\n15\nNone\n",
+    "test_mod_negative.py": "2\n-2\n-1\n1\n0\n0.5\n-0.5\n-4\n-4\nNone\n",
     "test_const.py": "579\n",
     "test_contains.py": "2\n",
     "test_continue.py": "18\nNone\n",
@@ -29,6 +36,7 @@ EXPECTED_OUTPUT = {
     "test_enumerate.py": "[list len=2]\n[list len=2]\n[list len=2]\n0\n",
     "test_enumerate_simple.py": "[list len=3]\n",
     "test_expression_integration.py": "42\n-2\n42\nNone\n",
+    "test_first_class_function.py": "15\n42\n7\nNone\n",
     "test_float.py": "5.14\n",
     "test_float_builtin.py": "3.14\n",
     "test_for.py": "10\n",
@@ -39,7 +47,7 @@ EXPECTED_OUTPUT = {
     "test_recursion_deep.py": "50\nNone\n",
     "test_int_str.py": "124\n",
     "test_integration_basic.py": "60\ni\negrat\nNone\n",
-    "test_integration_collections.py": "3\n2\n1\n0\nNone\n",
+    "test_integration_collections.py": "13\n4\n1\n0\nNone\n",
     "test_list.py": "4\n",
     "test_list_comp.py": "7\n",
     "test_list_index.py": "20\n",
@@ -62,7 +70,6 @@ EXPECTED_OUTPUT = {
     "test_tuple.py": "3\n",
     "test_vars.py": "30\n",
     "tet_return_int.py": "42\n",
-    "studio_showcase.py": '28\n17\nhell\n56\n56\n',
     "test_floordiv.py": '3\n-4\nNone\n',
     "test_pow.py": '256\n27\nNone\n',
     "test_unary.py": '42\n3.14\n-6\n5\nNone\n',
@@ -98,11 +105,9 @@ def compile_example(source):
     ])
 
     if result.returncode != 0:
-        print(result.stdout, end="")
-        print(result.stderr, end="")
-        return False
+        return False, result.stdout + result.stderr
 
-    return output.exists()
+    return output.exists(), ""
 
 
 def pack_example(cvm):
@@ -118,18 +123,52 @@ def pack_example(cvm):
     ])
 
     if result.returncode != 0:
-        print(result.stdout, end="")
-        print(result.stderr, end="")
-        return False
+        return False, result.stdout + result.stderr
 
-    return exe.exists()
+    return exe.exists(), ""
 
 
 def run_example(exe):
     return run([str(exe)])
 
 
+def check_example(source):
+    expected = EXPECTED_OUTPUT.get(source.name)
+    expected_runtime_failure = source.name == "test_recursion_limit.py"
+
+    if expected is None and not expected_runtime_failure:
+        return False, "missing expected output", ""
+
+    ok, details = compile_example(source)
+    if not ok:
+        return False, "compile", details
+
+    cvm = OUTPUT / f"{source.stem}.cvm"
+
+    ok, details = pack_example(cvm)
+    if not ok:
+        return False, "pack", details
+
+    exe = OUTPUT / f"{source.stem}.exe"
+    result = run_example(exe)
+
+    if result.returncode != 0:
+        if expected_runtime_failure:
+            return True, "expected runtime limit", ""
+
+        return False, "runtime", result.stdout + result.stderr
+
+    if result.stdout != expected:
+        return False, "output", (
+            f"Expected:\n{expected!r}\nActual:\n{result.stdout!r}\n"
+        )
+
+    return True, "", ""
+
+
 def main():
+    quiet = "--quiet" in sys.argv[1:]
+
     OUTPUT.mkdir(exist_ok=True)
 
     if not STUB.exists():
@@ -147,56 +186,24 @@ def main():
     failed = 0
 
     for source in examples:
-        print(f"Testing {source.name}...", end=" ")
+        if not quiet:
+            print(f"Testing {source.name}...", end=" ", flush=True)
 
-        expected = EXPECTED_OUTPUT.get(source.name)
-        expected_runtime_failure = source.name == "test_recursion_limit.py"
+        ok, note, details = check_example(source)
 
-        if expected is None and not expected_runtime_failure:
-            print("FAIL (missing expected output)")
-            failed += 1
+        if ok:
+            passed += 1
+            if not quiet:
+                print(f"PASS ({note})" if note else "PASS")
             continue
 
-        if not compile_example(source):
-            print("FAIL (compile)")
-            failed += 1
-            continue
-
-        cvm = OUTPUT / f"{source.stem}.cvm"
-
-        if not pack_example(cvm):
-            print("FAIL (pack)")
-            failed += 1
-            continue
-
-        exe = OUTPUT / f"{source.stem}.exe"
-        result = run_example(exe)
-
-        if result.returncode != 0:
-            if source.name == "test_recursion_limit.py":
-                print("PASS (expected runtime limit)")
-                passed += 1
-                continue
-
-            print("FAIL (runtime)")
-            if result.stdout:
-                print(result.stdout, end="")
-            if result.stderr:
-                print(result.stderr, end="")
-            failed += 1
-            continue
-
-        if result.stdout != expected:
-            print("FAIL (output)")
-            print("Expected:")
-            print(repr(expected))
-            print("Actual:")
-            print(repr(result.stdout))
-            failed += 1
-            continue
-
-        print("PASS")
-        passed += 1
+        failed += 1
+        if quiet:
+            print(f"{source.name}: FAIL ({note})")
+        else:
+            print(f"FAIL ({note})")
+        if details:
+            print(details.rstrip("\n"))
 
     total = passed + failed
 

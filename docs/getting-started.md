@@ -1,8 +1,34 @@
+---
+title: Getting Started
+nav_order: 2
+description: "Build the native VM, compile a program, and pack it into a standalone executable."
+---
+
 # Getting Started
+{: .no_toc }
+
+Build the VM, compile a program, and turn it into a standalone Windows executable.
+{: .fs-6 .fw-300 }
+
+<details open markdown="block">
+  <summary>
+    On this page
+  </summary>
+  {: .text-delta }
+1. TOC
+{:toc}
+</details>
+
+## Requirements
+
+- Windows
+- Python 3
+- Microsoft C/C++ build tools (Visual Studio or Visual Studio Build Tools)
+
+{: .note }
+Run the build from an **MSVC Developer Command Prompt** or **Developer PowerShell**. In a regular shell, load the environment first by calling `vcvars64.bat` from your Visual Studio installation.
 
 ## 1. Build the native VM
-
-Open an MSVC Developer Command Prompt or Developer PowerShell.
 
 From the repository root:
 
@@ -10,84 +36,67 @@ From the repository root:
 python vm_c/build.py --release
 ```
 
-This produces:
+This produces `vm_c/stub.exe`, the native VM that runs compiled programs.
 
-```text
-vm_c/stub.exe
-```
+## 2. Write a program
 
-## 2. Compile a program
-
-Compile one of the included examples:
-
-```powershell
-python -m compiler.cli examples/test_app.py -o output/test_app.cvm
-```
-
-The resulting `.cvm` file is a CVM2 compiled module.
-
-## 3. Pack a standalone executable
-
-Use the native VM stub and compiled module:
-
-```powershell
-python -m packer.pack vm_c/stub.exe output/test_app.cvm output/test_app.exe
-```
-
-The result is a standalone Windows executable.
-
-## 4. Run it
-
-From PowerShell:
-
-```powershell
-.\output\test_app.exe
-```
-
-## 5. Run the tests
-
-The main regression suite:
-
-```powershell
-python tests/run_examples.py
-```
-
-Compiler errors:
-
-```powershell
-python tests/test_compiler_errors.py
-```
-
-Container validation:
-
-```powershell
-python tests/test_container_errors.py
-```
-
-Arithmetic errors:
-
-```powershell
-python tests/test_arithmetic_errors.py
-```
-
-## What cVM supports
-
-cVM implements a deliberately limited Python-like subset.
-
-Supported functionality includes variables, functions, conditionals, loops, collections, indexing, slicing, comprehensions, arithmetic, comparisons, boolean operations, and selected built-ins/method calls.
-
-Unsupported Python syntax is rejected by the compiler.
-
-## First program
-
-A minimal program can look like:
+Save this as `hello.py`:
 
 ```python
-x = 10
-y = 20
-print(x + y)
+def greet(name, punctuation="!"):
+    return "Hello " + name + punctuation
+
+print(greet("cVM"))
 ```
 
-Compile and pack it using the same commands above.
+## 3. Compile it
 
-The purpose of v0.1.0 is to provide a stable foundation rather than full Python compatibility.
+```powershell
+python -m compiler.cli hello.py -o output/hello.cvm
+```
+
+The `.cvm` file is a compiled CVM2 module. Without `-o`, the compiler writes `hello.cvm` next to the source file.
+
+## 4. Pack a standalone executable
+
+```powershell
+python -m packer.pack vm_c/stub.exe output/hello.cvm output/hello.exe
+```
+
+The executable contains the native VM and your compiled program.
+
+## 5. Run it
+
+```powershell
+.\output\hello.exe
+```
+
+```text
+Hello cVM!
+None
+```
+
+The last line is the module's return value. A packed executable always prints it, and a module without a `return` statement returns `None`.
+
+## Run the tests
+
+```powershell
+python tests/run_all.py
+```
+
+Only failing tests and the total count are printed. See [Development](DEVELOPMENT.md#tests) for the individual suites.
+
+## Troubleshooting
+
+| Message | What to do |
+|:--------|:-----------|
+| `VCToolsInstallDir not set. Run from Developer Command Prompt.` | The MSVC environment is not loaded. See the note under [Requirements](#requirements). |
+| `stub.exe not found` | Build the VM first, as in step 1 above. |
+| `compile error: ...` | The source uses something outside the supported subset. Check [Compatibility](COMPATIBILITY.md). |
+| `VM run error: Type error` | A runtime type error, such as calling a value that is not a function or comparing unsupported types. |
+| `VM load error: Unsupported version` | The module was compiled by a different cVM version. Recompile it. |
+
+## Next steps
+
+- Read the [Language Reference](LANGUAGE.md) to see what you can write.
+- Check [Compatibility](COMPATIBILITY.md) for differences from Python.

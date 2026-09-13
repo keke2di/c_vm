@@ -1,40 +1,61 @@
-# cVM Language
+---
+title: Language Reference
+nav_order: 3
+description: "The Python subset that cVM compiles and runs."
+---
 
-cVM implements a defined subset of Python syntax.
+# Language Reference
+{: .no_toc }
 
-It uses Python's AST parser as the front end, but it does not attempt to execute arbitrary Python programs.
+The Python subset that cVM compiles and runs.
+{: .fs-6 .fw-300 }
 
-Unsupported syntax produces a compiler error.
+<details open markdown="block">
+  <summary>
+    On this page
+  </summary>
+  {: .text-delta }
+1. TOC
+{:toc}
+</details>
+
+## Overview
+
+cVM uses Python's own parser, so programs are written in normal Python syntax. Only a defined subset is compiled. Anything else produces a compiler error rather than being silently misinterpreted.
+
+{: .note }
+This page describes what you can write. The [Compatibility](COMPATIBILITY.md) page lists every feature's status and where behavior differs from Python.
 
 ## Values
 
-The compiler/runtime support values including:
+| Type | Example |
+|:-----|:--------|
+| `None` | `None` |
+| Integers (signed 64-bit) | `42`, `-7` |
+| Floats | `3.14` |
+| Strings | `"cVM"` |
+| Bytes | `b"abc"` |
+| Lists | `[1, 2, 3]` |
+| Tuples | `(1, 2)` |
+| Dictionaries | `{"a": 1}` |
+| Sets | `{1, 2}` |
+| Functions | `print`, `add` |
 
-- `None`
-- Integers
-- Floating-point numbers
-- Strings
-- Bytes
-- Lists
-- Tuples
-- Dictionaries
-- Sets
-- Functions
+`True` and `False` are stored as the integers `1` and `0`.
 
 ## Variables
-
-Simple assignments are supported:
 
 ```python
 x = 10
 name = "cVM"
+items[0] = x
 ```
 
-Module-level assignments are globals. Assignments inside functions use local variables.
+Module-level assignments create globals. Assignments inside a function create locals. Only one assignment target is allowed per statement.
 
 ## Functions
 
-Function definitions with positional arguments are supported:
+Top-level functions with positional parameters:
 
 ```python
 def add(a, b):
@@ -43,118 +64,122 @@ def add(a, b):
 result = add(2, 3)
 ```
 
-Functions can return values with `return`.
+Functions can be called before their definition appears in the file.
 
-## Conditionals
+### Keyword arguments and defaults
 
-Basic conditional statements are supported:
+```python
+def greet(name, punctuation="!"):
+    return "Hello " + name + punctuation
+
+greet("Ada")
+greet("Ada", "?")
+greet(punctuation=".", name="Ada")
+```
+
+Arguments are bound in this order:
+
+1. Positional arguments fill the leading parameters.
+2. Keyword arguments fill parameters by name.
+3. Remaining parameters take their default values.
+
+Too many arguments, an unknown keyword, the same parameter given twice, or a parameter left without a value is a runtime type error.
+
+{: .important }
+Default values must be constant expressions: numbers, strings, bytes, `None`, `True`, `False`, and tuples of these. They are fixed when the program is compiled.
+
+### Functions as values
+
+User-defined and built-in functions are values. They can be assigned, passed, returned, and stored in collections, and any expression that evaluates to a function can be called:
+
+```python
+def apply(fn, value):
+    return fn(value)
+
+p = print
+p(apply(str, 42))
+
+ops = [add]
+ops[0](1, 2)
+```
+
+Calling a value that is not a function is a runtime type error. A top-level `def` that uses a built-in's name replaces that built-in in the module.
+
+### Not supported
+
+- Nested functions, closures, and `lambda`
+- Decorators
+- `*args`, `**kwargs`, keyword-only and positional-only parameters
+- Argument unpacking with `*` or `**`
+- Keyword arguments to built-in functions and methods
+- The `global` and `nonlocal` statements
+
+## Control flow
+
+### Conditionals
 
 ```python
 if x > 10:
     print(x)
+elif x > 5:
+    print(5)
 else:
     print(0)
 ```
 
-Chained or more advanced Python conditional constructs are outside the supported subset.
-
-## Loops
-
-`while` loops are supported:
+### Loops
 
 ```python
 while x < 10:
-    x = x + 1
+    x += 1
+
+for row in rows:
+    for value in row:
+        print(value)
+
+for i in range(0, 10, 2):
+    print(i)
 ```
 
-`for` loops are supported over supported collections:
-
-```python
-for value in items:
-    print(value)
-```
-
-`range()` is supported with one to three integer constant arguments. Negative steps are not supported.
-
-`break` and `continue` are supported inside loops.
+- `for` iterates lists, tuples, strings, bytes, and dictionary keys.
+- `range()` takes one to three integer constants with a non-negative step.
+- `break`, `continue`, and `pass` are supported.
+- `for ... else` and `while ... else` are not supported.
 
 ## Operators
 
-Supported binary operations include:
+| Kind | Operators |
+|:-----|:----------|
+| Arithmetic | `+` `-` `*` `/` `//` `%` `**` |
+| Comparison | `==` `!=` `<` `<=` `>` `>=` |
+| Membership | `in` `not in` |
+| Boolean | `and` `or` `not` |
+| Unary | `+` `-` `~` |
+| Augmented assignment | `+=` `-=` `*=` `/=` `//=` `%=` `**=` |
 
-```text
-+
--
-*
-/
-//
-%
-**
-```
-
-Supported comparisons include:
-
-```text
-==
-!=
-<
-<=
->
->=
-```
-
-Membership tests:
-
-```text
-in
-not in
-```
-
-Unary operators include:
-
-```text
-+
--
-~
-not
-```
-
-Boolean `and` and `or` are supported.
-
-Chained comparisons are not supported.
+- `/` between two integers performs truncating integer division.
+- `//` and `%` follow Python's sign rules.
+- Comparisons work on numbers, strings, and bytes, and `==` / `!=` also work on tuples. Comparing other values, including `None`, is a runtime type error.
+- Chained comparisons such as `a < b < c` are not supported.
 
 ## Collections
 
-The compiler supports:
-
 ```python
-[1, 2, 3]
-(1, 2, 3)
-{1, 2, 3}
-{"a": 1, "b": 2}
-```
+items = [1, 2, 3]
+point = (1, 2)
+tags = {"a", "b"}
+ages = {"ada": 36}
 
-Indexing:
-
-```python
 items[0]
-mapping["key"]
-```
+items[-1]
+ages["ada"]
 
-Slicing:
-
-```python
 items[1:3]
-items[:3]
-items[1:]
 items[::2]
+"abc"[::-1]
 ```
 
 ## Comprehensions
-
-Single-generator list, set, and dictionary comprehensions are supported.
-
-Examples:
 
 ```python
 [x * 2 for x in values]
@@ -162,46 +187,38 @@ Examples:
 {x: x * 2 for x in values}
 ```
 
-Comprehensions with `if` clauses or multiple generators are not currently supported.
+Comprehensions take a single `for` clause without an `if` clause, and can be nested.
 
 ## Built-ins and methods
 
-`len()` is supported directly by the compiler.
+| Built-in | Purpose |
+|:---------|:--------|
+| `print(*values)` | Print values separated by spaces |
+| `len(x)` | Length of a string, bytes, list, tuple, dict, or set |
+| `int(x)` | Convert to an integer |
+| `float(x)` | Convert to a float |
+| `str(x)` | Convert to a string |
+| `list(*items)` | Build a list from the arguments |
+| `enumerate(items)` | List of `[index, item]` pairs |
+| `append(items, value)` | Append to a list |
 
-Simple method calls are supported:
+| Method | Purpose |
+|:-------|:--------|
+| `list.append(value)` | Append to a list |
+| `dict.get(key)` | Look up a key |
+| `set.add(value)` | Add to a set |
 
-```python
-value.method(argument)
-```
+`len()` compiles to a single instruction unless `len` is a parameter or local variable, or the module defines its own `def len`.
 
-The available methods depend on the native runtime's supported value operations.
+## Output
 
-## Assignment limitations
+`print` separates its arguments with spaces. Numbers, strings, and `None` print as you would expect.
 
-Only a single assignment target is supported.
-
-For example:
-
-```python
-x = 1
-```
-
-is supported, while multiple-target assignment is outside the current subset.
-
-Assignment to an indexed container is supported:
-
-```python
-items[0] = value
-```
+{: .note }
+Lists, tuples, dicts, sets, and bytes print as summaries such as `[list len=3]`, and floats print with up to 6 significant digits. See [Printing](COMPATIBILITY.md#printing-and-string-conversion).
 
 ## Errors
 
-The compiler reports unsupported syntax and invalid constructs as compilation errors.
+The compiler reports unsupported syntax and invalid constructs as `compile error: ...`.
 
-The native runtime reports execution failures such as type errors, stack errors, division by zero, overflow, invalid references, and malformed bytecode.
-
-## Scope
-
-The language is intentionally small.
-
-The goal of the first public release is a predictable supported subset rather than broad Python compatibility.
+At runtime, the VM stops with `VM run error: <kind>` for type errors, argument binding errors, division by zero, integer overflow, stack errors, and invalid bytecode. There is no exception handling.

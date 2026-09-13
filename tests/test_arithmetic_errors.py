@@ -60,6 +60,8 @@ def run(command):
 
 
 def main():
+    quiet = "--quiet" in sys.argv[1:]
+
     if not STUB.exists():
         print(f"stub.exe not found: {STUB}")
         print("Build the VM first.")
@@ -124,7 +126,8 @@ def main():
                 failed += 1
                 continue
 
-            print(f"{name}: PASS")
+            if not quiet:
+                print(f"{name}: PASS")
             passed += 1
 
     total = passed + failed

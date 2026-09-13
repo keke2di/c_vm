@@ -4,11 +4,28 @@ cVM is a small Python-like language runtime built around a custom bytecode compi
 
 cVM compiles a supported subset of Python source into CVM2 bytecode, executes that bytecode in the native VM, and can package programs into standalone `.exe` files.
 
-## cVM v0.1.0
+**Documentation:** <https://keke2di.github.io/c_vm/>
 
-The first public release focuses on a stable, deliberately limited language subset and a hardened native runtime.
+## cVM v0.2.0
 
-cVM is **not** intended to implement the full Python language. Unsupported Python features are rejected by the compiler rather than silently interpreted.
+v0.2.0 completes the function model:
+
+- Functions are first-class values. User-defined and built-in functions can be assigned, passed, returned, stored in collections, and called through any expression.
+- Calls accept keyword arguments.
+- Parameters can have default values.
+- A top-level `def` with a built-in's name replaces that built-in.
+- `print` returns `None` and prints multiple arguments in order.
+- Calling a value that is not a function is a runtime type error.
+
+It also fixes bugs present in v0.1.0:
+
+- A `for` loop over a collection nested inside another one ended the outer loop early. Nested loops and nested comprehensions now run correctly.
+- `%` follows Python's sign rules for negative operands.
+- `for ... else`, `while ... else`, `**` inside dict literals, decorators, and type parameters are rejected by the compiler instead of being silently ignored.
+
+The CVM2 format version is now **3**. Modules compiled with v0.1.0 must be recompiled. Executables packed with v0.1.0 keep working because they carry their own runtime.
+
+cVM is **not** intended to implement the full Python language. Unsupported Python features are rejected by the compiler or stopped with a runtime error. See [Compatibility](https://keke2di.github.io/c_vm/COMPATIBILITY.html) for the full support matrix and known differences from Python.
 
 ## Architecture
 
@@ -52,30 +69,32 @@ examples/        Example programs
 tests/           Regression and validation tests
 docs/            Technical documentation
 gui.py           Development GUI
-debug_disasm.py  Bytecode debugging/disassembly utility
+debug_disasm.py  Bytecode disassembly utility
 ```
 
 ## Supported language subset
 
 The compiler currently supports:
 
-- Integer, floating-point, string, boolean, and `None` constants
+- Integer, floating-point, string, bytes, boolean, and `None` constants
 - Variables and assignments
 - Local variables inside functions
 - Global variables at module scope
-- Function definitions
-- Function calls
-- Method calls
-- `if` / `else`
+- Top-level function definitions
+- Keyword arguments and default parameter values
+- Functions as values, including built-in functions
+- Calls on any expression that evaluates to a function
+- Method calls (`list.append`, `dict.get`, `set.add`)
+- `if` / `elif` / `else`
 - `while`
-- `for`
+- `for`, including nested loops
 - `break`
 - `continue`
 - `return`
 - `pass`
 - Arithmetic operations
 - Comparisons
-- Boolean `and` / `or`
+- Boolean `and` / `or` / `not`
 - Unary operators
 - Membership tests with `in` / `not in`
 - Lists
@@ -85,25 +104,33 @@ The compiler currently supports:
 - Indexing
 - Slicing
 - `len()`
-- List comprehensions
-- Set comprehensions
-- Dictionary comprehensions
+- List, set, and dictionary comprehensions
 
 Some constructs are intentionally restricted. For example:
 
 - Chained comparisons are not supported.
 - `for` loop targets must be simple names.
-- `range()` currently requires integer constant arguments.
-- Negative `range()` steps are not supported.
-- Comprehensions currently support a single generator without an `if` condition.
+- `for ... else` and `while ... else` are not supported.
+- `range()` requires integer constant arguments and a non-negative step, and only works directly in a `for` statement.
+- Comprehensions support a single generator without an `if` condition.
 - Multiple assignment targets are not supported.
+- Default parameter values must be constant expressions.
+- `*args`, `**kwargs`, keyword-only parameters, positional-only parameters, and argument unpacking are not supported.
+- Nested functions, closures, `lambda`, decorators, classes, exceptions, and imports are not supported.
 - Unsupported AST constructs produce compiler errors.
 
-The supported subset is intentionally small and explicit.
+Some supported features behave differently from Python. For example:
+
+- `True` and `False` are the integers `1` and `0`.
+- `/` between two integers performs integer division.
+- Comparing values other than numbers, strings, bytes, and tuples is a runtime type error, including `x == None`.
+- Lists, tuples, dicts, sets, and bytes print as summaries such as `[list len=3]`.
+
+The full list is in [Compatibility](https://keke2di.github.io/c_vm/COMPATIBILITY.html).
 
 ## CVM2 format
 
-Compiled modules use the **CVM2** container format.
+Compiled modules use the **CVM2** container format, currently format version 3.
 
 The container contains the information required by the native runtime, including:
 
@@ -111,7 +138,7 @@ The container contains the information required by the native runtime, including
 - Bytecode
 - Constants
 - Global/name information
-- Function metadata
+- Function metadata, including parameter names and default values
 - Function bytecode
 
 CVM2 performs structural and bounds validation before bytecode is executed.
@@ -188,45 +215,36 @@ The resulting executable contains the native VM stub and the compiled CVM2 progr
 
 ## Running the tests
 
-The example regression suite:
+Run every suite:
+
+```powershell
+python tests/run_all.py
+```
+
+`run_all.py` prints only failing tests and the total passed/failed count.
+
+Each suite can also be run on its own. Add `--quiet` to show only failures and the summary.
 
 ```powershell
 python tests/run_examples.py
-```
-
-Compiler error tests:
-
-```powershell
 python tests/test_compiler_errors.py
-```
-
-CVM2/container validation tests:
-
-```powershell
 python tests/test_container_errors.py
-```
-
-Arithmetic overflow/error tests:
-
-```powershell
 python tests/test_arithmetic_errors.py
-```
-
-Runtime stress tests:
-
-```powershell
+python tests/test_runtime_errors.py
 python tests/runtime_stress.py
 ```
 
-The v0.1.0 release candidate currently passes:
+The v0.2.0 release passes:
 
 ```text
-55 example tests
-4 compiler error tests
-9 container validation tests
+63 example tests
+20 compiler error tests
+14 container validation tests
 8 arithmetic error tests
+12 runtime error tests
+5 runtime stress tests
 
-76 passed
+122 passed
 0 failed
 ```
 
@@ -241,7 +259,8 @@ The runtime handles conditions including:
 - Invalid opcodes
 - Invalid constant/function/local references
 - Stack errors
-- Invalid types
+- Invalid types, including calls on values that are not functions
+- Argument binding errors
 - Division by zero
 - Integer overflow
 - Runtime function lookup failures
@@ -253,22 +272,18 @@ The native runtime has also been exercised with development-time memory-safety t
 
 cVM is intentionally kept separate from **cVM Studio**.
 
-The core runtime and compiler are the focus of the v0.1.0 release. Studio development is planned independently after the core release.
+The core runtime and compiler are the focus of this repository. Studio development is planned independently.
 
 ## Status
 
-**cVM v0.1.0 — first public release**
+**cVM v0.2.0**
 
-The v0.1.0 scope is intentionally conservative:
+- First-class functions, keyword arguments, and default parameter values
+- Nested loop, nested comprehension, and modulo fixes
+- CVM2 format version 3
+- Regression and negative tests passing
 
-- Supported language subset is frozen.
-- Runtime behavior is stabilized.
-- CVM2 loading is validated.
-- Native runtime error handling has been hardened.
-- Release build tooling is in place.
-- Regression and negative tests are passing.
-
-Future versions can expand the language and runtime without changing the deliberately limited scope of the first public release.
+Future versions will continue to widen the supported Python subset while keeping unsupported behavior explicit.
 
 ## License
 

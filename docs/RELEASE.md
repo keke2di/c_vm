@@ -1,17 +1,38 @@
+---
+title: Release Process
+nav_order: 8
+description: "How a cVM release is prepared and published."
+---
+
 # Release Process
+{: .no_toc }
 
-## cVM v0.1.0
+How a cVM release is prepared and published.
+{: .fs-6 .fw-300 }
 
-The first public release is intended to be a stable baseline for the compiler, CVM2 format, native VM, and standalone packer.
+<details open markdown="block">
+  <summary>
+    On this page
+  </summary>
+  {: .text-delta }
+1. TOC
+{:toc}
+</details>
 
-## Pre-release checklist
+## Versioning
+
+| Change | Version bump | Example |
+|:-------|:-------------|:--------|
+| Compatible fixes and features | Patch | `0.2.0` to `0.2.1` |
+| Bytecode, container, or runtime semantics change | Minor | `0.2.0` to `0.3.0` |
+
+## Checklist
 
 ### Source tree
 
 - Remove generated executables and build intermediates.
 - Remove Python cache directories.
 - Confirm only intended source, tests, examples, documentation, and project metadata remain.
-- Confirm the version is `0.1.0`.
 
 ### Build
 
@@ -25,20 +46,19 @@ The release build should complete without compiler warnings or errors.
 
 ### Tests
 
-Run:
-
 ```powershell
-python tests/run_examples.py
-python tests/test_compiler_errors.py
-python tests/test_container_errors.py
-python tests/test_arithmetic_errors.py
+python tests/run_all.py
 ```
 
-All release tests should pass.
+Every suite must pass.
 
-### Validation
+### Documentation
 
-Run:
+- Update the version in `README.md` and on the documentation home page.
+- Update [Compatibility](COMPATIBILITY.md) and the [Language Reference](LANGUAGE.md) for any behavior change.
+- Add a [Changelog](CHANGELOG.md) entry.
+
+### Review
 
 ```powershell
 git diff --check
@@ -47,52 +67,33 @@ git status --short
 
 Review the complete working tree before committing.
 
-## Release artifact
+## Publishing
 
-A standalone program is created by:
+```powershell
+git add .
+git status --short
+git diff --cached --check
+git commit -m "Release cVM v0.2.0"
+git tag -a v0.2.0 -m "cVM v0.2.0"
+git push origin main
+git push origin v0.2.0
+```
+
+Create the GitHub release from the tag, using the changelog entry as release notes.
+
+{: .note }
+This site is built by GitHub Pages from the `docs/` folder on `main`, so documentation changes go live with the push.
+
+## Release artifacts
+
+A standalone program is built with:
 
 ```powershell
 python -m compiler.cli examples/test_app.py -o output/test_app.cvm
 python -m packer.pack vm_c/stub.exe output/test_app.cvm output/test_app.exe
 ```
 
-Generated artifacts should remain outside the committed source tree unless they are intentionally attached to a GitHub release.
+Generated artifacts stay out of the source tree unless they are intentionally attached to a GitHub release.
 
-## Versioning
-
-The public release tag is:
-
-```text
-v0.1.0
-```
-
-The release commit should represent the complete source tree that was tested.
-
-## Git release sequence
-
-After the final source and documentation review:
-
-```powershell
-git add .
-git status --short
-git diff --cached --check
-git commit -m "Release cVM v0.1.0"
-git tag -a v0.1.0 -m "cVM v0.1.0"
-git push -u origin main
-git push origin v0.1.0
-```
-
-The GitHub release should be created from the `v0.1.0` tag.
-
-## Release notes
-
-Release notes should describe:
-
-- The first public cVM release
-- The supported language subset
-- CVM2 container behavior
-- Native VM/runtime hardening
-- Test coverage
-- Any intentionally unsupported functionality
-
-CVM2 does not provide cryptographic bytecode protection. This should remain explicit in public release documentation.
+{: .warning }
+CVM2 does not provide cryptographic bytecode protection. Release notes and documentation must keep saying so.

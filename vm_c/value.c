@@ -177,6 +177,27 @@ Value *value_new_set(void) {
     return v;
 }
 
+Value *value_new_none(void) {
+    return value_alloc(TAG_NONE);
+}
+
+Value *value_new_function(FunctionKind kind, uint32_t index, const char *name) {
+    Value *v = value_alloc(TAG_FUNCTION);
+
+    if (!v) return NULL;
+
+    v->data.func = malloc(sizeof(Function));
+    if (!v->data.func) {
+        free(v);
+        return NULL;
+    }
+
+    v->data.func->kind = kind;
+    v->data.func->index = index;
+    v->data.func->name = name;
+    return v;
+}
+
 Value *value_retain(Value *v) {
     if (v) {
         v->refcount++;
@@ -240,6 +261,10 @@ void value_release(Value *v) {
 
                 free(v->data.set.items);
             }
+            break;
+
+        case TAG_FUNCTION:
+            free(v->data.func);
             break;
 
         default:
@@ -609,8 +634,18 @@ char *value_to_string(const Value *v) {
             snprintf(
                 buf,
                 sizeof(buf),
-                "{set len=%u]",
+                "{set len=%u}",
                 v->data.set.len
+            );
+            break;
+
+        case TAG_FUNCTION:
+            snprintf(
+                buf,
+                sizeof(buf),
+                "<%sfunction %s>",
+                v->data.func && v->data.func->kind == FUNC_BUILTIN ? "built-in " : "",
+                v->data.func && v->data.func->name ? v->data.func->name : "?"
             );
             break;
 

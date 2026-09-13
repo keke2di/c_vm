@@ -23,6 +23,8 @@ def build_module(
 
     for i, fn in enumerate(functions):
         names.intern(fn.name)
+        for param_name in fn.param_names:
+            names.intern(param_name)
 
         if fn.name == entry_function:
             entry_idx = i
@@ -75,9 +77,24 @@ def _serialize_functions(functions: list, names: GlobalNames) -> bytes:
                 f"function {fn.name!r} code too large"
             )
 
+        if len(fn.param_names) != fn.num_params:
+            raise ContainerError(
+                f"function {fn.name!r} parameter names do not match parameter count"
+            )
+
+        if len(fn.default_consts) > fn.num_params:
+            raise ContainerError(
+                f"function {fn.name!r} has more defaults than params"
+            )
+
         out += struct.pack("<I", name_idx)
         out += struct.pack("<H", fn.num_locals)
         out += struct.pack("<H", fn.num_params)
+        out += struct.pack("<H", len(fn.default_consts))
+        for param_name in fn.param_names:
+            out += struct.pack("<I", names.index(param_name))
+        for const_idx in fn.default_consts:
+            out += struct.pack("<I", const_idx)
         out += struct.pack("<I", len(fn.code))
         out += fn.code
 

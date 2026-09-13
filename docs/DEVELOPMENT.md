@@ -1,117 +1,136 @@
+---
+title: Development
+nav_order: 7
+description: "Repository layout, building, testing, and debugging cVM."
+---
+
 # Development
+{: .no_toc }
+
+How the repository is organized, and how to build, test, and debug cVM.
+{: .fs-6 .fw-300 }
+
+<details open markdown="block">
+  <summary>
+    On this page
+  </summary>
+  {: .text-delta }
+1. TOC
+{:toc}
+</details>
 
 ## Requirements
 
-cVM currently targets Windows for its native runtime.
+- Windows
+- Python 3
+- Microsoft C/C++ build tools
 
-Development requires:
+{: .note }
+Build from an MSVC Developer Command Prompt or Developer PowerShell. From a regular shell, call `vcvars64.bat` from your Visual Studio installation first.
 
-- Python
-- An MSVC Developer Command Prompt or Developer PowerShell
-- A working Microsoft C/C++ build environment
+## Repository layout
 
-## Native VM build
+| Path | Contents |
+|:-----|:---------|
+| `compiler/` | Python compiler: AST to bytecode, constant pool, symbol tables, emitter, opcode table, CVM2 writer, command line |
+| `vm_c/` | Native VM: loader, interpreter, value model, executable stub, build script |
+| `packer/` | Appends a compiled module to the VM stub |
+| `examples/` | Example programs, also used as regression tests |
+| `tests/` | Test suites |
+| `docs/` | This documentation site |
+| `gui.py` | Small Tk GUI that compiles and packs a file |
+| `debug_disasm.py` | Prints the bytecode the compiler emits |
 
-From the repository root:
+## Building the VM
 
 ```powershell
 python vm_c/build.py --release
-```
-
-For a development/debug build:
-
-```powershell
 python vm_c/build.py --debug
 ```
 
-The normal release build produces:
+Both produce `vm_c/stub.exe`. The debug build defines `CVM_DEBUG`, which writes `[CALL]` and `[RETURN]` traces to stderr.
 
-```text
-vm_c/stub.exe
-```
-
-Build outputs and intermediate compiler artifacts should not be committed.
-
-## Compiler
-
-Compile an example module with:
+## Compiling and packing
 
 ```powershell
 python -m compiler.cli examples/test_app.py -o output/test_app.cvm
-```
-
-The compiler produces a CVM2 module containing the compiled program.
-
-## Packing
-
-A compiled module can be embedded into the native VM stub:
-
-```powershell
 python -m packer.pack vm_c/stub.exe output/test_app.cvm output/test_app.exe
 ```
 
-The resulting executable contains the native runtime and the compiled CVM2 program.
+## Inspecting bytecode
+
+`debug_disasm.py` prints each function's instructions:
+
+```powershell
+python debug_disasm.py examples/test_defaults.py
+```
+
+```text
+=== greet(name, punctuation) ===
+000: LOAD_CONST 1
+005: LOAD_FAST 0
+010: BINARY_ADD
+011: LOAD_FAST 1
+016: BINARY_ADD
+017: RETURN
+018: LOAD_CONST 2
+023: RETURN
+```
+
+See [Bytecode](BYTECODE.md) for what each instruction does.
 
 ## Tests
 
-Run the example regression suite:
+Run every suite:
 
 ```powershell
-python tests/run_examples.py
+python tests/run_all.py
 ```
 
-Run compiler-negative tests:
+`run_all.py` prints only failing tests and the total, and exits with a non-zero status if anything fails.
 
-```powershell
-python tests/test_compiler_errors.py
-```
+| Suite | Covers | Tests |
+|:------|:-------|------:|
+| `tests/run_examples.py` | Compiles, packs, and runs every program in `examples/`, comparing output | 63 |
+| `tests/test_compiler_errors.py` | Unsupported or invalid source is rejected with the expected error | 20 |
+| `tests/test_container_errors.py` | Malformed CVM2 containers are rejected | 14 |
+| `tests/test_arithmetic_errors.py` | Integer overflow is reported | 8 |
+| `tests/test_runtime_errors.py` | Call and argument binding errors are reported | 12 |
+| `tests/runtime_stress.py` | Deep recursion and large collections | 5 |
 
-Run CVM2 validation tests:
+Each suite can also run on its own. Pass `--quiet` to print only failures and the summary line.
 
-```powershell
-python tests/test_container_errors.py
-```
+`runtime_stress.py` uses `vm_c/asan_stub.exe` when present (an AddressSanitizer build) and `vm_c/stub.exe` otherwise.
 
-Run arithmetic error tests:
+## Adding a language feature
 
-```powershell
-python tests/test_arithmetic_errors.py
-```
+1. **Compiler.** Compile the new AST node in `compiler/compiler.py`, or reject it with a `CompileError`.
+2. **Opcodes.** For a new instruction, add it to `compiler/opcodes.py` and regenerate the C header with `python -m compiler.opcodes`.
+3. **VM.** Implement it in `vm_c/vm.c`. Validate operands and types, and set a VM error instead of crashing.
+4. **Format.** If the module layout changes, bump `FORMAT_VERSION` in `compiler/crypto.py` and the version check in `vm_c/loader.c`.
+5. **Tests.** Add an example with its expected output to `tests/run_examples.py`, and negative cases to the error suites.
+6. **Docs.** Update the [Language Reference](LANGUAGE.md), [Compatibility](COMPATIBILITY.md), and [Changelog](CHANGELOG.md).
 
-Runtime stress tests:
+## Guidelines
 
-```powershell
-python tests/runtime_stress.py
-```
-
-The v0.1.0 release test set currently passes 76 tests across the example, compiler-error, container-error, and arithmetic-error suites.
-
-## Development rules for v0.1.x
-
-The v0.1 release line should prioritize:
+Changes should prioritize, in order:
 
 1. Correctness
 2. Runtime safety
 3. Deterministic error handling
-4. Compatibility with the supported language subset
+4. Compatibility with the supported subset
 5. Regression coverage
 
-Changes that alter language semantics, bytecode compatibility, or the CVM2 layout should be treated as compatibility-sensitive work.
+{: .important }
+Changes to language semantics, bytecode, or the CVM2 layout are compatibility-sensitive. They need tests, a changelog entry, and usually a minor version bump.
 
-## Native runtime safety
-
-The native VM should be tested with both normal regression cases and malformed-input cases.
-
-Development-time memory-safety tools such as AddressSanitizer may be used when investigating native runtime issues. Their runtime files are development artifacts and are not part of the normal release tree.
+Development-time memory-safety tools such as AddressSanitizer are useful when investigating native runtime issues. Their runtime files are not part of the release tree.
 
 ## Repository hygiene
 
 Do not commit:
 
-- Native compiler intermediates
-- Generated executables
+- Native build intermediates (`*.obj`, `*.pdb`, `*.ilk`)
+- Generated executables and `.cvm` files
 - Python `__pycache__` directories
-- Temporary output files
-- Local development artifacts
-
-The public repository should contain source, tests, examples, documentation, and the files required to reproduce a release.
+- The `output/` directory

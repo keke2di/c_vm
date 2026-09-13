@@ -141,6 +141,93 @@ static int parse_constant(
     }
 }
 
+typedef struct {
+    uint32_t name_idx;
+    uint16_t num_locals;
+    uint16_t num_params;
+    uint16_t num_defaults;
+    size_t param_names_pos;
+    size_t defaults_pos;
+    uint32_t code_len;
+    size_t code_pos;
+} FunctionRecord;
+
+static int parse_function_record(
+    const VM *vm,
+    const uint8_t *data,
+    size_t *pos,
+    size_t end,
+    FunctionRecord *rec
+) {
+    size_t p = *pos;
+
+    if (p > end || end - p < 4 + 2 + 2 + 2) {
+        return VM_ERR_BOUNDS;
+    }
+
+    memcpy(&rec->name_idx, data + p, 4);
+    p += 4;
+
+    memcpy(&rec->num_locals, data + p, 2);
+    p += 2;
+
+    memcpy(&rec->num_params, data + p, 2);
+    p += 2;
+
+    memcpy(&rec->num_defaults, data + p, 2);
+    p += 2;
+
+    if (
+        rec->name_idx >= vm->num_names ||
+        rec->num_params > rec->num_locals ||
+        rec->num_defaults > rec->num_params
+    ) {
+        return VM_ERR_BOUNDS;
+    }
+
+    size_t tables_len = ((size_t)rec->num_params + rec->num_defaults) * 4;
+
+    if (end - p < tables_len + 4) {
+        return VM_ERR_BOUNDS;
+    }
+
+    rec->param_names_pos = p;
+
+    for (uint32_t i = 0; i < rec->num_params; i++) {
+        uint32_t name_idx;
+        memcpy(&name_idx, data + p, 4);
+        p += 4;
+
+        if (name_idx >= vm->num_names) {
+            return VM_ERR_BOUNDS;
+        }
+    }
+
+    rec->defaults_pos = p;
+
+    for (uint32_t i = 0; i < rec->num_defaults; i++) {
+        uint32_t const_idx;
+        memcpy(&const_idx, data + p, 4);
+        p += 4;
+
+        if (const_idx >= vm->num_constants) {
+            return VM_ERR_BOUNDS;
+        }
+    }
+
+    memcpy(&rec->code_len, data + p, 4);
+    p += 4;
+
+    if ((size_t)rec->code_len > end - p) {
+        return VM_ERR_BOUNDS;
+    }
+
+    rec->code_pos = p;
+    *pos = p + rec->code_len;
+
+    return VM_ERR_OK;
+}
+
 int vm_load(VM *vm, const char *filename) {
     if (!vm || !filename) return VM_ERR_LOAD;
 
@@ -220,7 +307,7 @@ int vm_load(VM *vm, const char *filename) {
 
     uint8_t version = buf[pos++];
 
-    if (version != 2) {
+    if (version != 3) {
         free(buf);
         vm->last_error = VM_ERR_VERSION;
         return vm->last_error;
@@ -513,46 +600,21 @@ int vm_load(VM *vm, const char *filename) {
 
     size_t total_code = 0;
     size_t temp_pos = ppos;
+    FunctionRecord rec;
 
     for (uint32_t i = 0; i < num_functions; i++) {
-        if (temp_pos + 4 + 2 + 2 + 4 > funcs_end) {
+        err = parse_function_record(vm, plain, &temp_pos, funcs_end, &rec);
+
+        if (err != VM_ERR_OK) {
+            goto fail;
+        }
+
+        if ((size_t)rec.code_len > SIZE_MAX - total_code) {
             err = VM_ERR_BOUNDS;
             goto fail;
         }
 
-        uint32_t name_idx;
-        uint16_t num_locals;
-        uint16_t num_params;
-        uint32_t code_len;
-
-        memcpy(&name_idx, plain + temp_pos, 4);
-        temp_pos += 4;
-
-        memcpy(&num_locals, plain + temp_pos, 2);
-        temp_pos += 2;
-
-        memcpy(&num_params, plain + temp_pos, 2);
-        temp_pos += 2;
-
-        memcpy(&code_len, plain + temp_pos, 4);
-        temp_pos += 4;
-
-        if (
-            (size_t)code_len > funcs_end - temp_pos ||
-            name_idx >= vm->num_names ||
-            num_params > num_locals
-        ) {
-            err = VM_ERR_BOUNDS;
-            goto fail;
-        }
-
-        if ((size_t)code_len > SIZE_MAX - total_code) {
-            err = VM_ERR_BOUNDS;
-            goto fail;
-        }
-
-        total_code += code_len;
-        temp_pos += code_len;
+        total_code += rec.code_len;
     }
 
     if (temp_pos != funcs_end) {
@@ -573,51 +635,57 @@ int vm_load(VM *vm, const char *filename) {
     uint32_t code_offset = 0;
 
     for (uint32_t i = 0; i < num_functions; i++) {
-        if (temp_pos + 4 + 2 + 2 + 4 > funcs_end) {
-            err = VM_ERR_BOUNDS;
-            goto fail;
-        }
+        err = parse_function_record(vm, plain, &temp_pos, funcs_end, &rec);
 
-        uint32_t name_idx;
-        uint16_t num_locals;
-        uint16_t num_params;
-        uint32_t code_len;
-
-        memcpy(&name_idx, plain + temp_pos, 4);
-        temp_pos += 4;
-
-        memcpy(&num_locals, plain + temp_pos, 2);
-        temp_pos += 2;
-
-        memcpy(&num_params, plain + temp_pos, 2);
-        temp_pos += 2;
-
-        memcpy(&code_len, plain + temp_pos, 4);
-        temp_pos += 4;
-
-        if (
-            (size_t)code_len > funcs_end - temp_pos ||
-            name_idx >= vm->num_names ||
-            num_params > num_locals
-        ) {
-            err = VM_ERR_BOUNDS;
+        if (err != VM_ERR_OK) {
             goto fail;
         }
 
         memcpy(
             vm->bytecode + code_offset,
-            plain + temp_pos,
-            code_len
+            plain + rec.code_pos,
+            rec.code_len
         );
 
-        temp_pos += code_len;
+        FuncEntry *entry = &vm->functions[i];
 
-        vm->functions[i].name_index = name_idx;
-        vm->functions[i].code_offset = code_offset;
-        vm->functions[i].locals_count = num_locals;
-        vm->functions[i].params_count = num_params;
+        entry->name_index = rec.name_idx;
+        entry->code_offset = code_offset;
+        entry->locals_count = rec.num_locals;
+        entry->params_count = rec.num_params;
+        entry->defaults_count = rec.num_defaults;
 
-        code_offset += code_len;
+        if (rec.num_params > 0) {
+            entry->param_names = malloc((size_t)rec.num_params * sizeof(uint32_t));
+
+            if (!entry->param_names) {
+                err = VM_ERR_OOM;
+                goto fail;
+            }
+
+            memcpy(
+                entry->param_names,
+                plain + rec.param_names_pos,
+                (size_t)rec.num_params * sizeof(uint32_t)
+            );
+        }
+
+        if (rec.num_defaults > 0) {
+            entry->default_consts = malloc((size_t)rec.num_defaults * sizeof(uint32_t));
+
+            if (!entry->default_consts) {
+                err = VM_ERR_OOM;
+                goto fail;
+            }
+
+            memcpy(
+                entry->default_consts,
+                plain + rec.defaults_pos,
+                (size_t)rec.num_defaults * sizeof(uint32_t)
+            );
+        }
+
+        code_offset += rec.code_len;
     }
 
     if (temp_pos != funcs_end) {

@@ -45,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         container = encode_container(plain, pepper_id=1, flags=0)
     except (
+        SyntaxError,
         CompileError,
         EmitterError,
         SymbolError,

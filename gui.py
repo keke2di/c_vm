@@ -10,10 +10,10 @@ class cVMGUI:
     def __init__(self, root):
         self.root = root
         self.project_root = Path(__file__).resolve().parent
-        root.title("cVM - Python Code Protector")
+        root.title("cVM Builder")
         root.geometry("750x550")
 
-        tk.Label(root, text="Python Source File to Protect:").pack(pady=5)
+        tk.Label(root, text="Python Source File:").pack(pady=5)
 
         self.file_frame = tk.Frame(root)
         self.file_frame.pack(fill=tk.X, padx=10)
@@ -23,10 +23,10 @@ class cVMGUI:
         tk.Button(self.file_frame, text="Browse", command=self.browse_file).pack(side=tk.RIGHT, padx=5)
 
         tk.Label(root, text="Output EXE Name:").pack(pady=5)
-        self.output_name = tk.StringVar(value="protected_app")
+        self.output_name = tk.StringVar(value="app")
         tk.Entry(root, textvariable=self.output_name, width=40).pack()
 
-        self.build_btn = tk.Button(root, text="Build Protected EXE", command=self.build,
+        self.build_btn = tk.Button(root, text="Build EXE", command=self.build,
                                    bg="#2e7d32", fg="white", padx=20, pady=10, font=("Arial", 10, "bold"))
         self.build_btn.pack(pady=15)
 
@@ -61,7 +61,7 @@ class cVMGUI:
 
         out_name = self.output_name.get().strip()
         if not out_name:
-            out_name = "protected_app"
+            out_name = "app"
 
         self.build_btn.config(state='disabled')
         self.log_message("=== BUILD START ===")

@@ -20,6 +20,11 @@ typedef enum {
 typedef struct Value Value;
 typedef struct Function Function;
 
+typedef enum {
+    FUNC_USER,
+    FUNC_BUILTIN,
+} FunctionKind;
+
 typedef struct DictEntry {
     Value *key;
     Value *value;
@@ -79,11 +84,9 @@ struct Value {
 };
 
 struct Function {
-    char *name;
-    uint16_t nlocals;
-    uint16_t nparams;
-    uint32_t code_len;
-    unsigned char *code;
+    FunctionKind kind;
+    uint32_t index;
+    const char *name;
 };
 
 Value *value_new_int(int64_t i);
@@ -95,6 +98,8 @@ Value *value_new_tuple(size_t len);
 Value *value_new_list(void);
 Value *value_new_dict(void);
 Value *value_new_set(void);
+Value *value_new_none(void);
+Value *value_new_function(FunctionKind kind, uint32_t index, const char *name);
 
 Value *value_retain(Value *v);
 void value_release(Value *v);

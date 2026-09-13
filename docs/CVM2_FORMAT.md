@@ -1,87 +1,157 @@
-# CVM2 Container Format
+---
+title: CVM2 Format
+nav_order: 6
+description: "Layout of CVM2 containers, compiled modules, and packed executables."
+---
+
+# CVM2 Format
+{: .no_toc }
+
+The layout of `.cvm` containers, the module inside them, and packed executables.
+{: .fs-6 .fw-300 }
+
+<details open markdown="block">
+  <summary>
+    On this page
+  </summary>
+  {: .text-delta }
+1. TOC
+{:toc}
+</details>
+
+{: .warning }
+CVM2 is **not** an encryption format. The bytecode payload is stored in plain form, and anyone with a `.cvm` file or packed executable can inspect or extract it.
 
 ## Overview
 
-CVM2 is the container format used by cVM compiled modules.
-
-A `.cvm` file contains the data required to reconstruct a compiled module for the native VM.
-
-The format is designed to provide deterministic structure and strict validation before execution.
-
-**CVM2 is not an encryption format.** The bytecode payload is stored without cryptographic protection.
-
-## Header
-
-The current header is represented by:
+A `.cvm` file has three parts:
 
 ```text
-<4sBBHIIII16s
+┌──────────────────────────────┐
+│ header             40 bytes  │
+│ nonce              12 bytes  │
+│ module payload               │
+└──────────────────────────────┘
 ```
 
-in little-endian form.
+All integers are little-endian.
 
-The fields are:
+## Container header
+
+The header matches the Python `struct` format `<4sBBHIIII16s`, followed by the nonce.
+
+| Offset | Size | Field | Value |
+|-------:|-----:|:------|:------|
+| 0 | 4 | magic | `CVM2` |
+| 4 | 1 | format version | `3` |
+| 5 | 1 | pepper ID | `1` |
+| 6 | 2 | flags | `0` |
+| 8 | 4 | plaintext length | Payload length |
+| 12 | 4 | payload length | Must equal the plaintext length |
+| 16 | 4 | salt length | `16` |
+| 20 | 4 | nonce length | `12` |
+| 24 | 16 | salt | Reserved, written as zeros |
+| 40 | 12 | nonce | Reserved, written as zeros |
+| 52 | variable | payload | Serialized module; must end exactly at the end of the file |
+
+The pepper, salt, and nonce fields are kept for layout compatibility and are not used to encrypt anything.
+
+## Module payload
+
+| Field | Size |
+|:------|:-----|
+| Entry function index | u32 |
+| Constants section | tag `0x01` |
+| Names section | tag `0x02` |
+| Functions section | tag `0x03` |
+
+Each section is a 1-byte tag, a u32 length, and that many bytes of data. The sections appear in this order and must fill the payload exactly.
+
+### Constants section
+
+A u32 count, followed by that many tagged constants:
+
+| Tag | Type | Data |
+|:----|:-----|:-----|
+| `0x00` | `None` | none |
+| `0x01` | `False` | none; loads as the integer `0` |
+| `0x02` | `True` | none; loads as the integer `1` |
+| `0x03` | `int` | i64 |
+| `0x04` | `float` | f64 |
+| `0x05` | `str` | u32 length, then UTF-8 bytes |
+| `0x06` | `bytes` | u32 length, then the bytes |
+| `0x07` | `tuple` | u32 item count, then that many tagged constants |
+
+A module holds at most 65536 constants. The compiler limits strings and bytes to 1 MiB and tuples to 65536 items.
+
+### Names section
+
+A u32 count (at most 65535), followed by that many names. Each name is a u8 length and up to 255 UTF-8 bytes.
+
+The names section holds globals, function names, and parameter names.
+
+### Functions section
+
+A u32 function count (1 to 4096), followed by one record per function.
+
+Function record, format version 3:
 
 | Field | Size | Description |
-|---|---:|---|
-| magic | 4 bytes | `CVM2` |
-| format version | 1 byte | Current format version |
-| pepper ID | 1 byte | Format compatibility field |
-| flags | 2 bytes | Container flags |
-| plaintext length | 4 bytes | Bytecode/module payload length |
-| payload length | 4 bytes | Stored payload length |
-| salt length | 4 bytes | Salt field length |
-| nonce length | 4 bytes | Nonce field length |
-| salt | 16 bytes | Reserved container field |
+|:------|:-----|:------------|
+| name index | u32 | Index into the names section |
+| local count | u16 | Number of local slots |
+| parameter count | u16 | Number of parameters, at most the local count |
+| default count | u16 | Number of defaults, at most the parameter count |
+| parameter names | u32 × parameter count | Name indexes, in parameter order |
+| default values | u32 × default count | Constant indexes for the last parameters |
+| code length | u32 | Bytecode length |
+| code | code length bytes | Function bytecode, see [Bytecode](BYTECODE.md) |
 
-A nonce field follows the fixed header.
+## Packed executables
 
-The current implementation retains the pepper, salt, nonce, and length fields as part of the CVM2 layout, but does not use them to encrypt the payload.
+The packer appends a container and a 16-byte trailer to the VM stub:
 
-## Payload
+| Part | Size |
+|:-----|:-----|
+| VM stub (`stub.exe`) | stub size |
+| `.cvm` container | container size |
+| Container offset | u64 |
+| Container length | u32 |
+| Trailer magic `CVMT` | 4 bytes |
 
-The payload contains the serialized cVM module.
-
-It includes the information required by the loader for:
-
-- Constants
-- Global/name data
-- Function metadata
-- Function bytecode
-- Entry-function information
-
-The compiler creates this module before wrapping it in the CVM2 container.
+At startup, the stub reads the trailer from the end of its own file, checks the magic, and loads the container from the recorded offset.
 
 ## Validation
 
-The native loader performs structural validation before execution.
+The loader checks, before anything runs:
 
-Validation includes checks for:
+- Magic, format version, pepper ID, and flags
+- Header field lengths and payload bounds
+- Declared lengths against physical lengths, including trailing data
+- Section tags and section lengths
+- Constant encodings
+- Name indexes for functions and parameters
+- Constant indexes for default values
+- Parameter and default counts
+- Entry function index
 
-- Correct magic
-- Supported format version
-- Supported pepper ID
-- Supported flags
-- Valid field lengths
-- Payload bounds
-- Matching declared and physical lengths
-- Valid constant indexes
-- Valid function indexes
-- Valid local references
-- Valid jump targets
-- Valid opcodes
-- Trailing physical data
+The VM checks, while it runs:
+
+- Opcodes
+- Constant, local, and global references
+- Jump targets
+- Stack bounds
+- Call targets and argument binding
 
 Malformed containers are rejected rather than executed.
 
 ## Compatibility
 
-CVM2 is versioned. A runtime should reject container versions it does not understand.
+The runtime accepts only the format version it was built for.
 
-Changes to the serialized layout, bytecode representation, or metadata semantics may require a new format version.
+| Format version | cVM | Change |
+|:---------------|:----|:-------|
+| 2 | v0.1.0 | First public format |
+| 3 | v0.2.0 | Function records carry a default count, parameter names, and default values |
 
-## Security note
-
-CVM2 provides structural validation, not confidentiality.
-
-Anyone with access to a `.cvm` file or packed executable should assume that its bytecode can be inspected or extracted.
+Modules compiled by an older compiler must be recompiled. Packed executables are not affected, because each one carries the runtime it was built with.

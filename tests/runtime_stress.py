@@ -7,7 +7,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 COMPILER = "compiler.cli"
 PACKER = "packer.pack"
-STUB = ROOT / "vm_c" / "asan_stub.exe"
+ASAN_STUB = ROOT / "vm_c" / "asan_stub.exe"
+STUB = ASAN_STUB if ASAN_STUB.exists() else ROOT / "vm_c" / "stub.exe"
 
 CASES = {
     "deep_recursion": (
@@ -143,6 +144,7 @@ def run_case(name, source, expected, expect_failure):
 
 
 def main():
+    quiet = "--quiet" in sys.argv[1:]
     passed = 0
 
     for name, (source, expected, expect_failure) in CASES.items():
@@ -153,7 +155,8 @@ def main():
             error = "timeout"
 
         if ok:
-            print(f"{name}: PASS")
+            if not quiet:
+                print(f"{name}: PASS")
             passed += 1
         else:
             print(f"{name}: FAIL")

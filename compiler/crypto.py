@@ -3,7 +3,7 @@ from __future__ import annotations
 import struct
 
 MAGIC = b"CVM2"
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 HEADER_STRUCT = struct.Struct("<4sBBHIIII16s")
 

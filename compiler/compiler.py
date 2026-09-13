@@ -17,6 +17,8 @@ class CompiledFunction:
     num_locals: int
     num_params: int
     code: bytes
+    param_names: List[str] = field(default_factory=list)
+    default_consts: List[int] = field(default_factory=list)
 
 @dataclass
 class CompiledModule:
@@ -31,9 +33,13 @@ class Compiler:
         self.names = GlobalNames()
         self.functions: List[CompiledFunction] = []
         self._func_index: Dict[str, int] = {}
+        self._defined_functions: set[str] = set()
 
     def compile_module(self, source: str, filename: str = "<module>") -> CompiledModule:
         tree = ast.parse(source, filename=filename)
+        self._defined_functions = {
+            node.name for node in tree.body if isinstance(node, ast.FunctionDef)
+        }
         module_body: List[ast.stmt] = []
         for node in tree.body:
             if isinstance(node, ast.FunctionDef):
@@ -57,9 +63,29 @@ class Compiler:
     def _compile_function(self, node: ast.FunctionDef) -> None:
         if node.name in self._func_index:
             raise CompileError(f"duplicate function: {node.name}")
+        args = node.args
+        if node.decorator_list:
+            raise CompileError("decorators are not supported yet")
+        if getattr(node, "type_params", None):
+            raise CompileError("type parameters are not supported")
+        if args.vararg is not None:
+            raise CompileError("*args parameters are not supported yet")
+        if args.kwarg is not None:
+            raise CompileError("**kwargs parameters are not supported yet")
+        if args.kwonlyargs:
+            raise CompileError("keyword-only parameters are not supported yet")
+        if args.posonlyargs:
+            raise CompileError("positional-only parameters are not supported yet")
+        param_names = [arg.arg for arg in args.args]
+        if len(set(param_names)) != len(param_names):
+            raise CompileError(f"duplicate parameter name in function {node.name}")
+        default_consts = [
+            self.constants.add(_constant_default(default))
+            for default in args.defaults
+        ]
         locals_tbl = LocalTable(node.name)
-        for arg in node.args.args:
-            locals_tbl.declare(arg.arg)
+        for param_name in param_names:
+            locals_tbl.declare(param_name)
         emitter = Emitter(node.name)
         ctx = _FuncCtx(
             emitter=emitter,
@@ -77,8 +103,10 @@ class Compiler:
         self.functions.append(CompiledFunction(
             name=node.name,
             num_locals=locals_tbl.count(),
-            num_params=len(node.args.args),
+            num_params=len(param_names),
             code=code,
+            param_names=param_names,
+            default_consts=default_consts,
         ))
         self._func_index[node.name] = idx
 
@@ -89,6 +117,7 @@ class _FuncCtx:
     compiler: "Compiler"
     loop_stack: list
     is_module: bool = False
+    iter_depth: int = 0
 
 def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
     if isinstance(node, ast.Assign):
@@ -156,6 +185,8 @@ def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
         return
 
     if isinstance(node, ast.While):
+        if node.orelse:
+            raise CompileError("while ... else is not supported yet")
         start_label = ctx.emitter.new_label("while_start")
         end_label = ctx.emitter.new_label("while_end")
         ctx.emitter.label(start_label)
@@ -170,6 +201,8 @@ def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
         return
 
     if isinstance(node, ast.For):
+        if node.orelse:
+            raise CompileError("for ... else is not supported yet")
         is_range = (isinstance(node.iter, ast.Call) and
                     isinstance(node.iter.func, ast.Name) and
                     node.iter.func.id == 'range')
@@ -261,8 +294,8 @@ def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
             if not isinstance(target, ast.Name):
                 raise CompileError("for loop target must be a simple name")
 
-            temp_name = "__iter_temp"
-            temp_idx = ctx.locals.declare(temp_name)
+            ctx.iter_depth += 1
+            temp_idx = ctx.locals.declare(f"__iter_temp_{ctx.iter_depth}")
 
             _compile_expr(ctx, node.iter)
             ctx.emitter.emit("STORE_FAST", temp_idx)
@@ -270,12 +303,10 @@ def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
             ctx.emitter.emit("LOAD_FAST", temp_idx)
             ctx.emitter.emit("LEN")
 
-            temp_len_name = "__len_temp"
-            len_idx = ctx.locals.declare(temp_len_name)
+            len_idx = ctx.locals.declare(f"__len_temp_{ctx.iter_depth}")
             ctx.emitter.emit("STORE_FAST", len_idx)
 
-            idx_name = "__index_temp"
-            idx_idx = ctx.locals.declare(idx_name)
+            idx_idx = ctx.locals.declare(f"__index_temp_{ctx.iter_depth}")
 
             ctx.emitter.emit(
                 "LOAD_CONST",
@@ -324,6 +355,7 @@ def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
 
             ctx.emitter.emit_jump("JUMP_ABSOLUTE", start_label)
             ctx.emitter.label(end_label)
+            ctx.iter_depth -= 1
 
             return
 
@@ -424,196 +456,15 @@ def _compile_expr(ctx: _FuncCtx, node: ast.expr) -> None:
         ctx.emitter.emit("BUILD_SET", len(node.elts))
         return
     if isinstance(node, ast.Dict):
+        if any(key is None for key in node.keys):
+            raise CompileError("dict unpacking with ** is not supported yet")
         for key, value in zip(node.keys, node.values):
             _compile_expr(ctx, key)
             _compile_expr(ctx, value)
         ctx.emitter.emit("BUILD_MAP", len(node.keys))
         return
-    if isinstance(node, ast.ListComp):
-        if len(node.generators) != 1:
-            raise CompileError("Only single-generator list comprehensions are supported")
-        gen = node.generators[0]
-        if gen.ifs:
-            raise CompileError("List comprehensions with if conditions are not supported yet")
-
-        target = gen.target
-        if not isinstance(target, ast.Name):
-            raise CompileError("List comprehension target must be a simple name")
-
-        temp_list_name = "__list_comp"
-        temp_list_idx = ctx.locals.declare(temp_list_name)
-        ctx.emitter.emit("BUILD_LIST", 0)
-        ctx.emitter.emit("STORE_FAST", temp_list_idx)
-
-        iter_temp_name = "__iter_comp_temp"
-        iter_temp_idx = ctx.locals.declare(iter_temp_name)
-        _compile_expr(ctx, gen.iter)
-        ctx.emitter.emit("STORE_FAST", iter_temp_idx)
-
-        ctx.emitter.emit("LOAD_FAST", iter_temp_idx)
-        ctx.emitter.emit("LEN")
-        len_temp_name = "__len_comp_temp"
-        len_temp_idx = ctx.locals.declare(len_temp_name)
-        ctx.emitter.emit("STORE_FAST", len_temp_idx)
-
-        idx_temp_name = "__idx_comp_temp"
-        idx_temp_idx = ctx.locals.declare(idx_temp_name)
-        ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(0))
-        ctx.emitter.emit("STORE_FAST", idx_temp_idx)
-
-        start_label = ctx.emitter.new_label("comp_start")
-        end_label = ctx.emitter.new_label("comp_end")
-        ctx.emitter.label(start_label)
-
-        ctx.emitter.emit("LOAD_FAST", idx_temp_idx)
-        ctx.emitter.emit("LOAD_FAST", len_temp_idx)
-        ctx.emitter.emit("COMPARE_GE")
-        ctx.emitter.emit_jump("POP_JUMP_IF_TRUE", end_label)
-
-        ctx.emitter.emit("LOAD_FAST", iter_temp_idx)
-        ctx.emitter.emit("LOAD_FAST", idx_temp_idx)
-        ctx.emitter.emit("GET_ITER_ITEM")
-        target_idx = ctx.locals.index(target.id) if target.id in ctx.locals._by_name else ctx.locals.declare(target.id)
-        ctx.emitter.emit("STORE_FAST", target_idx)
-
-        ctx.emitter.emit("LOAD_FAST", temp_list_idx)
-        _compile_expr(ctx, node.elt)
-        ctx.emitter.emit("LIST_APPEND")
-
-        ctx.emitter.emit("LOAD_FAST", idx_temp_idx)
-        ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(1))
-        ctx.emitter.emit("BINARY_ADD")
-        ctx.emitter.emit("STORE_FAST", idx_temp_idx)
-
-        ctx.emitter.emit_jump("JUMP_ABSOLUTE", start_label)
-        ctx.emitter.label(end_label)
-
-        ctx.emitter.emit("LOAD_FAST", temp_list_idx)
-        return
-
-    if isinstance(node, ast.SetComp):
-        if len(node.generators) != 1:
-            raise CompileError("Only single-generator set comprehensions are supported")
-        gen = node.generators[0]
-        if gen.ifs:
-            raise CompileError("Set comprehensions with if conditions are not supported yet")
-
-        target = gen.target
-        if not isinstance(target, ast.Name):
-            raise CompileError("Set comprehension target must be a simple name")
-
-        temp_set_name = "__set_comp"
-        temp_set_idx = ctx.locals.declare(temp_set_name)
-        ctx.emitter.emit("BUILD_SET", 0)
-        ctx.emitter.emit("STORE_FAST", temp_set_idx)
-
-        iter_temp_name = "__iter_comp_temp"
-        iter_temp_idx = ctx.locals.declare(iter_temp_name)
-        _compile_expr(ctx, gen.iter)
-        ctx.emitter.emit("STORE_FAST", iter_temp_idx)
-
-        ctx.emitter.emit("LOAD_FAST", iter_temp_idx)
-        ctx.emitter.emit("LEN")
-        len_temp_name = "__len_comp_temp"
-        len_temp_idx = ctx.locals.declare(len_temp_name)
-        ctx.emitter.emit("STORE_FAST", len_temp_idx)
-
-        idx_temp_name = "__idx_comp_temp"
-        idx_temp_idx = ctx.locals.declare(idx_temp_name)
-        ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(0))
-        ctx.emitter.emit("STORE_FAST", idx_temp_idx)
-
-        start_label = ctx.emitter.new_label("comp_start")
-        end_label = ctx.emitter.new_label("comp_end")
-        ctx.emitter.label(start_label)
-
-        ctx.emitter.emit("LOAD_FAST", idx_temp_idx)
-        ctx.emitter.emit("LOAD_FAST", len_temp_idx)
-        ctx.emitter.emit("COMPARE_GE")
-        ctx.emitter.emit_jump("POP_JUMP_IF_TRUE", end_label)
-
-        ctx.emitter.emit("LOAD_FAST", iter_temp_idx)
-        ctx.emitter.emit("LOAD_FAST", idx_temp_idx)
-        ctx.emitter.emit("GET_INDEX")
-        target_idx = ctx.locals.index(target.id) if target.id in ctx.locals._by_name else ctx.locals.declare(target.id)
-        ctx.emitter.emit("STORE_FAST", target_idx)
-
-        ctx.emitter.emit("LOAD_FAST", temp_set_idx)
-        _compile_expr(ctx, node.elt)
-        ctx.emitter.emit("SET_ADD")
-
-        ctx.emitter.emit("LOAD_FAST", idx_temp_idx)
-        ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(1))
-        ctx.emitter.emit("BINARY_ADD")
-        ctx.emitter.emit("STORE_FAST", idx_temp_idx)
-
-        ctx.emitter.emit_jump("JUMP_ABSOLUTE", start_label)
-        ctx.emitter.label(end_label)
-
-        ctx.emitter.emit("LOAD_FAST", temp_set_idx)
-        return
-
-    if isinstance(node, ast.DictComp):
-        if len(node.generators) != 1:
-            raise CompileError("Only single-generator dict comprehensions are supported")
-        gen = node.generators[0]
-        if gen.ifs:
-            raise CompileError("Dict comprehensions with if conditions are not supported yet")
-
-        target = gen.target
-        if not isinstance(target, ast.Name):
-            raise CompileError("Dict comprehension target must be a simple name")
-
-        temp_dict_name = "__dict_comp"
-        temp_dict_idx = ctx.locals.declare(temp_dict_name)
-        ctx.emitter.emit("BUILD_MAP", 0)
-        ctx.emitter.emit("STORE_FAST", temp_dict_idx)
-
-        iter_temp_name = "__iter_comp_temp"
-        iter_temp_idx = ctx.locals.declare(iter_temp_name)
-        _compile_expr(ctx, gen.iter)
-        ctx.emitter.emit("STORE_FAST", iter_temp_idx)
-
-        ctx.emitter.emit("LOAD_FAST", iter_temp_idx)
-        ctx.emitter.emit("LEN")
-        len_temp_name = "__len_comp_temp"
-        len_temp_idx = ctx.locals.declare(len_temp_name)
-        ctx.emitter.emit("STORE_FAST", len_temp_idx)
-
-        idx_temp_name = "__idx_comp_temp"
-        idx_temp_idx = ctx.locals.declare(idx_temp_name)
-        ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(0))
-        ctx.emitter.emit("STORE_FAST", idx_temp_idx)
-
-        start_label = ctx.emitter.new_label("comp_start")
-        end_label = ctx.emitter.new_label("comp_end")
-        ctx.emitter.label(start_label)
-
-        ctx.emitter.emit("LOAD_FAST", idx_temp_idx)
-        ctx.emitter.emit("LOAD_FAST", len_temp_idx)
-        ctx.emitter.emit("COMPARE_GE")
-        ctx.emitter.emit_jump("POP_JUMP_IF_TRUE", end_label)
-
-        ctx.emitter.emit("LOAD_FAST", iter_temp_idx)
-        ctx.emitter.emit("LOAD_FAST", idx_temp_idx)
-        ctx.emitter.emit("GET_INDEX")
-        target_idx = ctx.locals.index(target.id) if target.id in ctx.locals._by_name else ctx.locals.declare(target.id)
-        ctx.emitter.emit("STORE_FAST", target_idx)
-
-        ctx.emitter.emit("LOAD_FAST", temp_dict_idx)
-        _compile_expr(ctx, node.key)
-        _compile_expr(ctx, node.value)
-        ctx.emitter.emit("MAP_ADD")
-
-        ctx.emitter.emit("LOAD_FAST", idx_temp_idx)
-        ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(1))
-        ctx.emitter.emit("BINARY_ADD")
-        ctx.emitter.emit("STORE_FAST", idx_temp_idx)
-
-        ctx.emitter.emit_jump("JUMP_ABSOLUTE", start_label)
-        ctx.emitter.label(end_label)
-
-        ctx.emitter.emit("LOAD_FAST", temp_dict_idx)
+    if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
+        _compile_comprehension(ctx, node)
         return
 
     if isinstance(node, ast.Subscript):
@@ -645,7 +496,20 @@ def _compile_expr(ctx: _FuncCtx, node: ast.expr) -> None:
         ctx.emitter.emit("GET_INDEX")
         return
     if isinstance(node, ast.Call):
+        for arg in node.args:
+            if isinstance(arg, ast.Starred):
+                raise CompileError("argument unpacking with * is not supported yet")
+        keyword_names = []
+        for keyword in node.keywords:
+            if keyword.arg is None:
+                raise CompileError("argument unpacking with ** is not supported yet")
+            if keyword.arg in keyword_names:
+                raise CompileError(f"duplicate keyword argument: {keyword.arg}")
+            keyword_names.append(keyword.arg)
+
         if isinstance(node.func, ast.Attribute):
+            if keyword_names:
+                raise CompileError("keyword arguments in method calls are not supported yet")
             _compile_expr(ctx, node.func.value)
             method_name = node.func.attr
             method_idx = ctx.compiler.constants.add(method_name)
@@ -654,22 +518,116 @@ def _compile_expr(ctx: _FuncCtx, node: ast.expr) -> None:
                 _compile_expr(ctx, arg)
             ctx.emitter.emit("CALL_METHOD", len(node.args))
             return
-        if not isinstance(node.func, ast.Name):
-            raise CompileError("only simple function or method calls supported")
-        func_name = node.func.id
-        if func_name == "len":
-            if len(node.args) != 1:
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id == "len"
+            and not ctx.locals.has("len")
+            and "len" not in ctx.compiler._defined_functions
+        ):
+            if len(node.args) != 1 or keyword_names:
                 raise CompileError("len() takes exactly one argument")
             _compile_expr(ctx, node.args[0])
             ctx.emitter.emit("LEN")
             return
+        _compile_expr(ctx, node.func)
         for arg in node.args:
             _compile_expr(ctx, arg)
-        name_idx = ctx.compiler.names.intern(func_name)
-        ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(name_idx))
-        ctx.emitter.emit("CALL_FUNCTION", len(node.args))
+        if not keyword_names:
+            ctx.emitter.emit("CALL_FUNCTION", len(node.args))
+            return
+        for keyword in node.keywords:
+            _compile_expr(ctx, keyword.value)
+        ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(tuple(keyword_names)))
+        ctx.emitter.emit("CALL_KW", len(node.args) + len(keyword_names))
         return
     raise CompileError(f"unsupported expression: {type(node).__name__}")
+
+_COMPREHENSIONS = {
+    ast.ListComp: ("List", "BUILD_LIST", "LIST_APPEND"),
+    ast.SetComp: ("Set", "BUILD_SET", "SET_ADD"),
+    ast.DictComp: ("Dict", "BUILD_MAP", "MAP_ADD"),
+}
+
+def _compile_comprehension(ctx: _FuncCtx, node: ast.expr) -> None:
+    kind, build_op, add_op = _COMPREHENSIONS[type(node)]
+    if len(node.generators) != 1:
+        raise CompileError(f"Only single-generator {kind.lower()} comprehensions are supported")
+    gen = node.generators[0]
+    if gen.ifs:
+        raise CompileError(f"{kind} comprehensions with if conditions are not supported yet")
+    if gen.is_async:
+        raise CompileError(f"async {kind.lower()} comprehensions are not supported")
+    if not isinstance(gen.target, ast.Name):
+        raise CompileError(f"{kind} comprehension target must be a simple name")
+
+    ctx.iter_depth += 1
+    depth = ctx.iter_depth
+    result_idx = ctx.locals.declare(f"__comp_result_{depth}")
+    iter_idx = ctx.locals.declare(f"__comp_iter_{depth}")
+    len_idx = ctx.locals.declare(f"__comp_len_{depth}")
+    index_idx = ctx.locals.declare(f"__comp_index_{depth}")
+
+    ctx.emitter.emit(build_op, 0)
+    ctx.emitter.emit("STORE_FAST", result_idx)
+
+    _compile_expr(ctx, gen.iter)
+    ctx.emitter.emit("STORE_FAST", iter_idx)
+
+    ctx.emitter.emit("LOAD_FAST", iter_idx)
+    ctx.emitter.emit("LEN")
+    ctx.emitter.emit("STORE_FAST", len_idx)
+
+    ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(0))
+    ctx.emitter.emit("STORE_FAST", index_idx)
+
+    start_label = ctx.emitter.new_label("comp_start")
+    end_label = ctx.emitter.new_label("comp_end")
+    ctx.emitter.label(start_label)
+
+    ctx.emitter.emit("LOAD_FAST", index_idx)
+    ctx.emitter.emit("LOAD_FAST", len_idx)
+    ctx.emitter.emit("COMPARE_GE")
+    ctx.emitter.emit_jump("POP_JUMP_IF_TRUE", end_label)
+
+    ctx.emitter.emit("LOAD_FAST", iter_idx)
+    ctx.emitter.emit("LOAD_FAST", index_idx)
+    ctx.emitter.emit("GET_ITER_ITEM")
+    ctx.emitter.emit("STORE_FAST", ctx.locals.declare(gen.target.id))
+
+    ctx.emitter.emit("LOAD_FAST", result_idx)
+    if isinstance(node, ast.DictComp):
+        _compile_expr(ctx, node.key)
+        _compile_expr(ctx, node.value)
+    else:
+        _compile_expr(ctx, node.elt)
+    ctx.emitter.emit(add_op)
+
+    ctx.emitter.emit("LOAD_FAST", index_idx)
+    ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(1))
+    ctx.emitter.emit("BINARY_ADD")
+    ctx.emitter.emit("STORE_FAST", index_idx)
+
+    ctx.emitter.emit_jump("JUMP_ABSOLUTE", start_label)
+    ctx.emitter.label(end_label)
+
+    ctx.emitter.emit("LOAD_FAST", result_idx)
+    ctx.iter_depth -= 1
+
+def _constant_default(node: ast.expr):
+    if isinstance(node, ast.Constant):
+        return node.value
+    if (
+        isinstance(node, ast.UnaryOp)
+        and isinstance(node.op, (ast.USub, ast.UAdd))
+        and isinstance(node.operand, ast.Constant)
+        and isinstance(node.operand.value, (int, float))
+        and not isinstance(node.operand.value, bool)
+    ):
+        value = node.operand.value
+        return -value if isinstance(node.op, ast.USub) else value
+    if isinstance(node, ast.Tuple):
+        return tuple(_constant_default(elt) for elt in node.elts)
+    raise CompileError("default values must be constant expressions")
 
 def _is_local_target(ctx: _FuncCtx, name: str) -> bool:
     return not ctx.is_module

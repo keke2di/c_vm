@@ -1,7 +1,7 @@
 #ifndef CVM_OPCODES_H
 #define CVM_OPCODES_H
 
-#define CVM_OPCODE_TABLE_VERSION 2
+#define CVM_OPCODE_TABLE_VERSION 3
 
 typedef enum {
     OP_NOP = 0x00,
@@ -36,6 +36,7 @@ typedef enum {
     OP_JUMP_IF_TRUE = 0x32,
     OP_CALL = 0x40,
     OP_RETURN = 0x41,
+    OP_CALL_KW = 0x42,
     OP_BUILD_LIST = 0x50,
     OP_BUILD_TUPLE = 0x51,
     OP_BUILD_MAP = 0x52,
@@ -65,6 +66,7 @@ static inline int cvm_operand_width(cvm_opcode_t op) {
         case OP_JUMP_IF_FALSE: return 4;
         case OP_JUMP_IF_TRUE: return 4;
         case OP_CALL: return 4;
+        case OP_CALL_KW: return 4;
         case OP_BUILD_LIST: return 4;
         case OP_BUILD_TUPLE: return 4;
         case OP_BUILD_MAP: return 4;

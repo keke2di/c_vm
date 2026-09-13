@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-# Base opcodes (canonical)
 CANONICAL_OPCODES = {
     "NOP":              0x00,
     "LOAD_CONST":       0x01,
@@ -38,6 +37,7 @@ CANONICAL_OPCODES = {
 
     "CALL":             0x40,
     "RETURN":           0x41,
+    "CALL_KW":          0x42,
 
     "BUILD_LIST":       0x50,
     "BUILD_TUPLE":      0x51,
@@ -59,7 +59,6 @@ CANONICAL_OPCODES = {
     "HALT":             0xFF,
 }
 
-# Aliases for the compiler (not emitted to C header)
 ALIASES = {
     "RETURN_VALUE":       0x41,
     "POP_JUMP_IF_FALSE":  0x31,
@@ -68,10 +67,8 @@ ALIASES = {
     "CALL_FUNCTION":      0x40,
 }
 
-# Merge for lookup
 OPCODES = {**CANONICAL_OPCODES, **ALIASES}
 
-# Operand widths (only canonical ones have widths, but we can set for aliases too)
 OPERAND_WIDTHS = {
     "LOAD_CONST":       4,
     "LOAD_FAST":        4,
@@ -82,6 +79,7 @@ OPERAND_WIDTHS = {
     "JUMP_IF_FALSE":    4,
     "JUMP_IF_TRUE":     4,
     "CALL":             4,
+    "CALL_KW":          4,
     "CALL_BUILTIN":     4,
     "BUILD_LIST":       4,
     "BUILD_TUPLE":      4,
@@ -89,14 +87,12 @@ OPERAND_WIDTHS = {
     "BUILD_SET":        4,
     "PRINT":            4,
     "CALL_METHOD":      4,
-    # Aliases
     "POP_JUMP_IF_FALSE":4,
     "POP_JUMP_IF_TRUE": 4,
     "JUMP_ABSOLUTE":    4,
     "CALL_FUNCTION":    4,
 }
 
-# Compute width by code
 OPCODE_WIDTH_BY_CODE = {
     code: OPERAND_WIDTHS.get(name, 0)
     for name, code in OPCODES.items()
@@ -107,7 +103,7 @@ def operand_width_for_code(op: int) -> int:
 
 OPERAND_WIDTH = operand_width_for_code
 
-OPCODE_TABLE_VERSION = 2
+OPCODE_TABLE_VERSION = 3
 
 _globals = globals()
 for _name, _value in OPCODES.items():

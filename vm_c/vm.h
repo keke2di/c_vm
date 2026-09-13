@@ -5,17 +5,18 @@
 #include <stddef.h>
 #include "value.h"
 
-// Forward declarations
 typedef struct VM VM;
 typedef struct Frame Frame;
 typedef struct FuncEntry FuncEntry;
 
-// Function table entry
 struct FuncEntry {
     uint32_t name_index;
     uint32_t code_offset;
     uint32_t locals_count;
     uint32_t params_count;
+    uint32_t defaults_count;
+    uint32_t *param_names;
+    uint32_t *default_consts;
 };
 
 struct Frame {
@@ -57,7 +58,6 @@ struct VM {
     char error_msg[256];
 };
 
-// error codes
 #define VM_ERR_OK           0
 #define VM_ERR_LOAD        -1
 #define VM_ERR_OOM         -2
