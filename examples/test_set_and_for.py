@@ -3,4 +3,4 @@ s = 0
 for x in lst:
     s = s + x
 set1 = {10, 20, 30}
-return s + len(set1)
+print(s + len(set1))

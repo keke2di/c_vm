@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import ast
+import sys
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .constants import ConstantPool
 from .emitter import Emitter, EmitterError
 from .symbols import GlobalNames, LocalTable, SymbolError
+
+REQUIRED_PYTHON = (3, 14)
 
 class CompileError(Exception):
     pass
@@ -36,6 +39,11 @@ class Compiler:
         self._defined_functions: set[str] = set()
 
     def compile_module(self, source: str, filename: str = "<module>") -> CompiledModule:
+        if tuple(sys.version_info[:2]) != REQUIRED_PYTHON:
+            raise CompileError(
+                f"cVM requires Python {REQUIRED_PYTHON[0]}.{REQUIRED_PYTHON[1]}, "
+                f"running {sys.version_info[0]}.{sys.version_info[1]}"
+            )
         tree = ast.parse(source, filename=filename)
         self._defined_functions = {
             node.name for node in tree.body if isinstance(node, ast.FunctionDef)
@@ -164,6 +172,8 @@ def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
         ctx.emitter.emit("POP_TOP")
         return
     if isinstance(node, ast.Return):
+        if ctx.is_module:
+            raise CompileError("'return' outside function")
         if node.value is None:
             ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(None))
         else:
@@ -406,6 +416,16 @@ def _compile_expr(ctx: _FuncCtx, node: ast.expr) -> None:
             _compile_expr(ctx, node.comparators[0])
             ctx.emitter.emit("CONTAINS")
             ctx.emitter.emit("UNARY_NOT")
+            return
+        elif isinstance(first_op, ast.Is):
+            _compile_expr(ctx, node.left)
+            _compile_expr(ctx, node.comparators[0])
+            ctx.emitter.emit("COMPARE_IS")
+            return
+        elif isinstance(first_op, ast.IsNot):
+            _compile_expr(ctx, node.left)
+            _compile_expr(ctx, node.comparators[0])
+            ctx.emitter.emit("COMPARE_IS_NOT")
             return
         _compile_expr(ctx, node.left)
         _compile_expr(ctx, node.comparators[0])

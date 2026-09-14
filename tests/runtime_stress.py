@@ -32,7 +32,7 @@ while i < 10000:
     i += 1
 print(len(x))
 """,
-        "10000\nNone\n",
+        "10000\n",
         False,
     ),
     "large_string": (
@@ -44,7 +44,7 @@ while i < 100000:
     i += 1
 print(len(x))
 """,
-        "100000\nNone\n",
+        "100000\n",
         False,
     ),
     "nested_collections": (
@@ -56,7 +56,7 @@ while i < 1000:
     i += 1
 print(len(x))
 """,
-        "1000\nNone\n",
+        "1000\n",
         False,
     ),
     "repeated_calls": (
@@ -71,7 +71,7 @@ while i < 100000:
     i += 1
 print(x)
 """,
-        "100000\nNone\n",
+        "100000\n",
         False,
     ),
 }

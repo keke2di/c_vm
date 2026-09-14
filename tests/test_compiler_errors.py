@@ -25,23 +25,26 @@ CASES = [
     ("while_else.py", "while ... else is not supported yet"),
     ("dict_unpack.py", "dict unpacking with ** is not supported yet"),
     ("type_params.py", "type parameters are not supported"),
+    ("module_return.py", "'return' outside function"),
+    ("python_version", "cVM requires Python 3.14, running 3.13"),
 ]
 
 
+VERSION_PROBE = (
+    "import sys\n"
+    "sys.version_info = (3, 13, 0, 'final', 0)\n"
+    "from compiler.cli import main\n"
+    "raise SystemExit(main(['tests/compiler_errors/unsupported.py']))\n"
+)
+
+
 def run_case(name):
-    source = ROOT / "tests" / "compiler_errors" / name
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "compiler.cli",
-            str(source),
-        ],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-    )
-    return result
+    if name == "python_version":
+        command = [sys.executable, "-c", VERSION_PROBE]
+    else:
+        source = ROOT / "tests" / "compiler_errors" / name
+        command = [sys.executable, "-m", "compiler.cli", str(source)]
+    return subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
 
 
 def main():

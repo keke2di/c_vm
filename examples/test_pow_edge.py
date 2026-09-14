@@ -1,0 +1,6 @@
+print(0 ** 2)
+print(0 ** 0)
+print((-2) ** 3)
+print(1 ** 100)
+print((-1) ** 63)
+print(3 ** 1)

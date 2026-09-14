@@ -1,7 +1,34 @@
 import argparse
 import os
+import re
+import shutil
 import subprocess
 from pathlib import Path
+
+
+def find_rc():
+    sdk_bin = os.environ.get("WindowsSdkVerBinPath")
+    if sdk_bin:
+        candidate = Path(sdk_bin) / "x64" / "rc.exe"
+        if candidate.exists():
+            return candidate
+    found = shutil.which("rc.exe")
+    return Path(found) if found else None
+
+
+def write_version_header(root):
+    init = (root.parent / "compiler" / "__init__.py").read_text(encoding="utf-8")
+    match = re.search(r'__version__ = "(\d+)\.(\d+)\.(\d+)"', init)
+    if not match:
+        raise SystemExit("could not read __version__ from compiler/__init__.py")
+    major, minor, patch = match.groups()
+    (root / "stub_version.h").write_text(
+        f"#define CVM_VERSION_MAJOR {major}\n"
+        f"#define CVM_VERSION_MINOR {minor}\n"
+        f"#define CVM_VERSION_PATCH {patch}\n"
+        f'#define CVM_VERSION_STRING "{major}.{minor}.{patch}"\n',
+        encoding="utf-8",
+    )
 
 
 def main(argv=None):
@@ -55,19 +82,17 @@ def main(argv=None):
         print(f"cl not found at {cl_exe}")
         return 1
 
-    sources = [
-        root / "value.c",
-        root / "vm.c",
-        root / "loader.c",
-        root / "stub.c",
-    ]
+    sources = sorted(root.glob("*.c"))
+    if not sources:
+        print("No native source files found.")
+        return 1
 
     objects = []
 
     for obj in root.glob("*.obj"):
         obj.unlink()
 
-    for artifact in ("stub.exe", "stub.exp", "stub.lib", "stub.pdb", "stub.ilk"):
+    for artifact in ("stub.exe", "stub.exp", "stub.lib", "stub.pdb", "stub.ilk", "stub.res"):
         path = root / artifact
         if path.exists():
             path.unlink()
@@ -80,7 +105,7 @@ def main(argv=None):
             "/GS",
             "/O2",
             "/GL",
-            "/MD",
+            "/MT",
         ]
         link_flags = [
             "/nologo",
@@ -88,6 +113,7 @@ def main(argv=None):
             "/INCREMENTAL:NO",
             "/MACHINE:X64",
             "/SUBSYSTEM:CONSOLE",
+            "/MANIFEST:NO",
         ]
         mode_name = "release"
     else:
@@ -98,7 +124,7 @@ def main(argv=None):
             "/GS",
             "/Od",
             "/Zi",
-            "/MD",
+            "/MTd",
             "/DCVM_DEBUG",
         ]
         link_flags = [
@@ -107,6 +133,7 @@ def main(argv=None):
             "/DEBUG",
             "/MACHINE:X64",
             "/SUBSYSTEM:CONSOLE",
+            "/MANIFEST:NO",
         ]
         mode_name = "debug"
 
@@ -128,17 +155,23 @@ def main(argv=None):
         subprocess.check_call(cmd)
         objects.append(obj)
 
-    if not objects:
-        print("No native source files found.")
+    rc_exe = find_rc()
+    if not rc_exe:
+        print("rc.exe not found. Run from Developer Command Prompt.")
         return 1
 
+    write_version_header(root)
+    resource = root / "stub.res"
+    print("Compiling stub.rc...")
+    subprocess.check_call([str(rc_exe), "/nologo", f"/fo{resource}", "stub.rc"], cwd=root)
+    objects.append(resource)
+
+    runtime_suffix = "" if release else "d"
     libs = [
         "kernel32.lib",
-        "user32.lib",
-        "advapi32.lib",
-        "bcrypt.lib",
-        "msvcrt.lib",
-        "vcruntime.lib",
+        f"libcmt{runtime_suffix}.lib",
+        f"libvcruntime{runtime_suffix}.lib",
+        f"libucrt{runtime_suffix}.lib",
     ]
 
     libpaths = [

@@ -434,7 +434,7 @@ def main():
             )
             result = execute(exe)
 
-            if result.returncode != 0 or result.stdout != "6\nNone\n":
+            if result.returncode != 0 or result.stdout != "6\n":
                 raise AssertionError(
                     f"unexpected result {result.returncode} "
                     f"{result.stdout!r} {result.stderr!r}"

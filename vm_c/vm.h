@@ -71,7 +71,7 @@ struct VM {
 #define VM_ERR_INVALID_OP  -10
 #define VM_ERR_OVERFLOW  -11
 
-int vm_load(VM *vm, const char *filename);
+int vm_load_memory(VM *vm, const uint8_t *data, size_t len);
 
 int vm_run(VM *vm);
 

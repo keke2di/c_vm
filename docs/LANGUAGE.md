@@ -41,7 +41,7 @@ This page describes what you can write. The [Compatibility](COMPATIBILITY.md) pa
 | Sets | `{1, 2}` |
 | Functions | `print`, `add` |
 
-`True` and `False` are stored as the integers `1` and `0`.
+`True` and `False` print as `True`/`False` but are a subtype of `int`: they equal `1` and `0` and behave as integers in arithmetic and as dict keys.
 
 ## Variables
 

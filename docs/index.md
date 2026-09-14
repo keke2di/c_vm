@@ -17,7 +17,7 @@ A small Python-like language runtime: a bytecode compiler, a native C virtual ma
 ---
 
 {: .new }
-Functions are first-class values, calls accept keyword arguments, and parameters can have default values. See the [changelog](CHANGELOG.md).
+The packed executable now loads from memory, needs no Visual C++ runtime, and imports only `KERNEL32.dll`. `bool`, `None`, `is`, and type objects are supported. See the [changelog](CHANGELOG.md).
 
 ## What is cVM?
 
@@ -65,10 +65,9 @@ python -m packer.pack vm_c/stub.exe output/example.cvm output/example.exe
 Hello cVM!
 Hello Ada?
 42 is a string
-None
 ```
 
-The final `None` is the module's return value, which a packed executable always prints.
+The program produces output through `print`; there is no implicit trailing output.
 
 ## Documentation
 
@@ -87,19 +86,20 @@ The final `None` is the module's return value, which a packed executable always 
 
 | | |
 |:--|:--|
-| Current release | **v0.2.0** |
+| Current release | **v0.2.1** |
 | Platform | Windows, built with MSVC |
 | CVM2 format version | 3 |
-| Test suite | 122 tests passing |
+| Test suite | 135 tests passing |
 
 | Test suite | Tests |
 |:-----------|------:|
-| Examples | 63 |
-| Compiler errors | 20 |
+| Examples | 69 |
+| Compiler errors | 22 |
 | Container validation | 14 |
 | Arithmetic errors | 8 |
 | Runtime errors | 12 |
 | Runtime stress | 5 |
+| Stub | 5 |
 
 {: .warning }
 CVM2 does not provide cryptographic protection. Anyone with a `.cvm` file or a packed executable can inspect or extract its bytecode.

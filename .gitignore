@@ -11,6 +11,8 @@ __pycache__/
 *.lib
 *.dll
 *.pyd
+*.res
+vm_c/stub_version.h
 *.exe
 
 # Generated project output

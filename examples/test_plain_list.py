@@ -1,2 +1,2 @@
 lst = [1, 2, 3, 4]
-return len(lst) + lst[2]
+print(len(lst) + lst[2])

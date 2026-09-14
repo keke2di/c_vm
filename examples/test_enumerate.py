@@ -1,4 +1,4 @@
 lst = ["a", "b", "c"]
 for item in enumerate(lst):
     print(item)
-return 0
+print(0)

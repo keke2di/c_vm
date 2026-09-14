@@ -10,11 +10,39 @@ description: "Changes in each cVM release."
 Changes in each cVM release.
 {: .fs-6 .fw-300 }
 
-## v0.2.0
+## v0.2.1
 {: .d-inline-block }
 
 Latest
 {: .label .label-green }
+
+### Added
+
+- `bool` is a distinct type: `True` and `False` print as `True`/`False` while still behaving as the integers `1` and `0` in arithmetic, indexing, slicing, and as dict keys.
+- `None` is a single shared object, so `is` and `is not` work; `None is None` is `True`.
+- Type objects: `type(x)`, `type(1) is int`, and reprs such as `<class 'int'>`. `int`, `float`, `str`, `bool`, `list`, `tuple`, `dict`, `set`, `bytes`, and `type` are the type objects themselves.
+
+### Changed
+
+- The packed executable loads its program from memory instead of writing it to a temporary file, and links the C runtime statically. It now imports only `KERNEL32.dll` and runs on a clean Windows install with no Visual C++ runtime.
+- Packed executables carry a version resource and an application manifest.
+- Comparisons, membership tests, and `not` produce real `bool` values (`print(1 == 1)` shows `True`).
+- A `return` statement outside a function is a compile error. Previously a module could `return` a value that the executable printed; use `print()` for output.
+
+### Internal
+
+- The native VM source is split into per-area files (values, numeric/comparison/sequence operations, calls, built-ins, type objects, loader, stub, platform). No behavior or performance change; the VM is measurably as fast.
+
+### Compatibility
+
+{: .important }
+Recompile any standalone `.cvm` modules. Executables packed with an earlier version keep working because each carries its own runtime.
+
+## v0.2.0
+{: .d-inline-block }
+
+Released
+{: .label }
 
 ### Added
 

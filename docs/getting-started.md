@@ -73,10 +73,9 @@ The executable contains the native VM and your compiled program.
 
 ```text
 Hello cVM!
-None
 ```
 
-The last line is the module's return value. A packed executable always prints it, and a module without a `return` statement returns `None`.
+The program produces output through `print`. A `return` statement outside a function is a compile error.
 
 ## Run the tests
 

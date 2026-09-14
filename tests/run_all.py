@@ -13,6 +13,7 @@ SUITES = [
     "test_container_errors.py",
     "test_arithmetic_errors.py",
     "test_runtime_errors.py",
+    "test_stub.py",
     "runtime_stress.py",
 ]
 

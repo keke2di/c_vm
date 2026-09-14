@@ -1,3 +1,3 @@
 lst = list(10, 20, 30)
 x = lst[1]
-return x
+print(x)

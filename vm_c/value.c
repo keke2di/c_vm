@@ -3,33 +3,9 @@
 #include <string.h>
 #include <stdio.h>
 
-static char *value_strdup(const char *s) {
-    if (!s) return NULL;
-
-    size_t len = strlen(s) + 1;
-    char *copy = malloc(len);
-
-    if (!copy) return NULL;
-
-    memcpy(copy, s, len);
-    return copy;
-}
-
-static char *value_strdup_len(const char *data, size_t len) {
-    if (len > UINT32_MAX) return NULL;
-    if (len > 0 && !data) return NULL;
-
-    char *copy = malloc(len + 1);
-
-    if (!copy) return NULL;
-
-    if (len > 0) {
-        memcpy(copy, data, len);
-    }
-
-    copy[len] = '\0';
-    return copy;
-}
+static Value g_none = { TAG_NONE, UINT32_MAX, { 0 } };
+static Value g_true = { TAG_BOOL, UINT32_MAX, { 1 } };
+static Value g_false = { TAG_BOOL, UINT32_MAX, { 0 } };
 
 static Value *value_alloc(ValueTag tag) {
     Value *v = malloc(sizeof(Value));
@@ -178,7 +154,19 @@ Value *value_new_set(void) {
 }
 
 Value *value_new_none(void) {
-    return value_alloc(TAG_NONE);
+    return &g_none;
+}
+
+Value *value_true(void) {
+    return &g_true;
+}
+
+Value *value_false(void) {
+    return &g_false;
+}
+
+Value *value_bool(int b) {
+    return b ? &g_true : &g_false;
 }
 
 Value *value_new_function(FunctionKind kind, uint32_t index, const char *name) {
@@ -199,7 +187,7 @@ Value *value_new_function(FunctionKind kind, uint32_t index, const char *name) {
 }
 
 Value *value_retain(Value *v) {
-    if (v) {
+    if (v && v->refcount != UINT32_MAX) {
         v->refcount++;
     }
 
@@ -207,7 +195,7 @@ Value *value_retain(Value *v) {
 }
 
 void value_release(Value *v) {
-    if (!v) return;
+    if (!v || v->refcount == UINT32_MAX) return;
 
     v->refcount--;
 
@@ -274,46 +262,10 @@ void value_release(Value *v) {
     free(v);
 }
 
-int64_t value_as_int(const Value *v) {
-    if (!v || v->tag != TAG_INT) return 0;
-
-    return v->data.int_val;
-}
-
-double value_as_float(const Value *v) {
-    if (!v || v->tag != TAG_FLOAT) return 0.0;
-
-    return v->data.float_val;
-}
-
-const char *value_as_string(const Value *v) {
-    if (!v || v->tag != TAG_STRING) return NULL;
-
-    return v->data.str.data;
-}
-
 size_t value_string_len(const Value *v) {
     if (!v || v->tag != TAG_STRING) return 0;
 
     return v->data.str.len;
-}
-
-size_t value_bytes_len(const Value *v) {
-    if (!v || v->tag != TAG_BYTES) return 0;
-
-    return v->data.bytes.len;
-}
-
-const unsigned char *value_bytes_data(const Value *v) {
-    if (!v || v->tag != TAG_BYTES) return NULL;
-
-    return v->data.bytes.data;
-}
-
-size_t value_list_len(const Value *v) {
-    if (!v || v->tag != TAG_LIST) return 0;
-
-    return v->data.list.len;
 }
 
 Value *value_list_get(const Value *v, size_t idx) {
@@ -357,12 +309,6 @@ int value_list_append(Value *list, Value *item) {
     list->data.list.len++;
 
     return 0;
-}
-
-size_t value_tuple_len(const Value *v) {
-    if (!v || v->tag != TAG_TUPLE) return 0;
-
-    return v->data.tuple.len;
 }
 
 Value *value_tuple_get(const Value *v, size_t idx) {
@@ -435,12 +381,6 @@ Value *value_dict_key_at(const Value *dict, size_t index) {
     return dict->data.dict.entries[index].key;
 }
 
-size_t value_dict_len(const Value *dict) {
-    if (!dict || dict->tag != TAG_DICT) return 0;
-
-    return dict->data.dict.len;
-}
-
 int value_set_add(Value *set, Value *item) {
     if (!set || set->tag != TAG_SET) return -1;
 
@@ -483,16 +423,50 @@ int value_set_contains(const Value *set, Value *item) {
     return 0;
 }
 
-size_t value_set_len(const Value *set) {
-    if (!set || set->tag != TAG_SET) return 0;
+int value_truthy(const Value *v) {
+    if (!v) return 0;
 
-    return set->data.set.len;
+    switch (v->tag) {
+        case TAG_INT:
+            return v->data.int_val != 0;
+        case TAG_BOOL:
+            return v->data.int_val != 0;
+        case TAG_FLOAT:
+            return v->data.float_val != 0.0;
+        case TAG_STRING:
+            return v->data.str.len != 0;
+        case TAG_BYTES:
+            return v->data.bytes.len != 0;
+        case TAG_LIST:
+            return v->data.list.len != 0;
+        case TAG_TUPLE:
+            return v->data.tuple.len != 0;
+        case TAG_DICT:
+            return v->data.dict.len != 0;
+        case TAG_SET:
+            return v->data.set.len != 0;
+        case TAG_FUNCTION:
+            return 1;
+        case TAG_TYPE:
+            return 1;
+        default:
+            return 0;
+    }
 }
 
 int value_compare(const Value *a, const Value *b) {
     if (a == b) return 0;
     if (!a) return -1;
     if (!b) return 1;
+
+    int a_int = a->tag == TAG_INT || a->tag == TAG_BOOL;
+    int b_int = b->tag == TAG_INT || b->tag == TAG_BOOL;
+
+    if (a_int && b_int) {
+        return
+            (a->data.int_val < b->data.int_val) ? -1 :
+            (a->data.int_val > b->data.int_val) ? 1 : 0;
+    }
 
     if (a->tag != b->tag) {
         return (int)a->tag - (int)b->tag;
@@ -562,105 +536,4 @@ int value_compare(const Value *a, const Value *b) {
         default:
             return (a < b) ? -1 : 1;
     }
-}
-
-char *value_to_string(const Value *v) {
-    if (!v) return value_strdup("nil");
-
-    char buf[256];
-
-    switch (v->tag) {
-        case TAG_INT:
-            snprintf(
-                buf,
-                sizeof(buf),
-                "%lld",
-                (long long)v->data.int_val
-            );
-            break;
-
-        case TAG_FLOAT:
-            snprintf(
-                buf,
-                sizeof(buf),
-                "%g",
-                v->data.float_val
-            );
-            break;
-
-        case TAG_STRING:
-            return value_strdup_len(
-                v->data.str.data,
-                v->data.str.len
-            );
-
-        case TAG_BYTES:
-            snprintf(
-                buf,
-                sizeof(buf),
-                "[bytes len=%u]",
-                v->data.bytes.len
-            );
-            break;
-
-        case TAG_TUPLE:
-            snprintf(
-                buf,
-                sizeof(buf),
-                "(tuple len=%u)",
-                v->data.tuple.len
-            );
-            break;
-
-        case TAG_LIST:
-            snprintf(
-                buf,
-                sizeof(buf),
-                "[list len=%u]",
-                v->data.list.len
-            );
-            break;
-
-        case TAG_DICT:
-            snprintf(
-                buf,
-                sizeof(buf),
-                "{dict len=%u}",
-                v->data.dict.len
-            );
-            break;
-
-        case TAG_SET:
-            snprintf(
-                buf,
-                sizeof(buf),
-                "{set len=%u}",
-                v->data.set.len
-            );
-            break;
-
-        case TAG_FUNCTION:
-            snprintf(
-                buf,
-                sizeof(buf),
-                "<%sfunction %s>",
-                v->data.func && v->data.func->kind == FUNC_BUILTIN ? "built-in " : "",
-                v->data.func && v->data.func->name ? v->data.func->name : "?"
-            );
-            break;
-
-        case TAG_NONE:
-            return value_strdup("None");
-
-        default:
-            snprintf(
-                buf,
-                sizeof(buf),
-                "unknown tag %d",
-                v->tag
-            );
-            break;
-    }
-
-    return value_strdup(buf);
 }

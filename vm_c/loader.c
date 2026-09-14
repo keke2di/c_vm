@@ -21,25 +21,17 @@ static int parse_constant(
     uint8_t typ = buf[(*pos)++];
 
     switch (typ) {
-        case 0x00: {
-            Value *v = malloc(sizeof(Value));
-            if (!v) return VM_ERR_OOM;
-
-            memset(v, 0, sizeof(Value));
-            v->tag = TAG_NONE;
-            v->refcount = 1;
-
-            *out = v;
+        case 0x00:
+            *out = value_new_none();
             return VM_ERR_OK;
-        }
 
         case 0x01:
-            *out = value_new_int(0);
-            return *out ? VM_ERR_OK : VM_ERR_OOM;
+            *out = value_false();
+            return VM_ERR_OK;
 
         case 0x02:
-            *out = value_new_int(1);
-            return *out ? VM_ERR_OK : VM_ERR_OOM;
+            *out = value_true();
+            return VM_ERR_OK;
 
         case 0x03: {
             if (end - *pos < 8) return VM_ERR_BOUNDS;
@@ -228,72 +220,18 @@ static int parse_function_record(
     return VM_ERR_OK;
 }
 
-int vm_load(VM *vm, const char *filename) {
-    if (!vm || !filename) return VM_ERR_LOAD;
-
-    memset(vm, 0, sizeof(VM));
-
-    uint8_t *buf = NULL;
+static int load_buffer(VM *vm, uint8_t *buf, size_t fsize) {
     uint8_t *plain = NULL;
     int err = VM_ERR_OK;
-
-    FILE *f = fopen(filename, "rb");
-    if (!f) {
-        vm->last_error = VM_ERR_LOAD;
-        return vm->last_error;
-    }
-
-    if (fseek(f, 0, SEEK_END) != 0) {
-        fclose(f);
-        vm->last_error = VM_ERR_LOAD;
-        return vm->last_error;
-    }
-
-    long fsize_long = ftell(f);
-
-    if (
-        fsize_long < 0 ||
-        (unsigned long long)fsize_long >
-            (unsigned long long)SIZE_MAX
-    ) {
-        fclose(f);
-        vm->last_error = VM_ERR_LOAD;
-        return vm->last_error;
-    }
-
-    if (fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        vm->last_error = VM_ERR_LOAD;
-        return vm->last_error;
-    }
-
-    size_t fsize = (size_t)fsize_long;
 
     if (
         fsize <
         4 + 1 + 1 + 2 + 4 + 4 + 4 + 4 + 16 + 12
     ) {
-        fclose(f);
+        free(buf);
         vm->last_error = VM_ERR_BOUNDS;
         return vm->last_error;
     }
-
-    buf = malloc(fsize);
-
-    if (!buf) {
-        fclose(f);
-        vm->last_error = VM_ERR_OOM;
-        return vm->last_error;
-    }
-
-    if (fread(buf, 1, fsize, f) != fsize) {
-        free(buf);
-        fclose(f);
-        vm->last_error = VM_ERR_LOAD;
-        return vm->last_error;
-    }
-
-    fclose(f);
 
     size_t pos = 0;
 
@@ -719,4 +657,21 @@ fail:
     vm_free(vm);
     vm->last_error = err;
     return err;
+}
+
+int vm_load_memory(VM *vm, const uint8_t *data, size_t len) {
+    if (!vm || !data) return VM_ERR_LOAD;
+
+    memset(vm, 0, sizeof(VM));
+
+    uint8_t *buf = malloc(len ? len : 1);
+
+    if (!buf) {
+        vm->last_error = VM_ERR_OOM;
+        return vm->last_error;
+    }
+
+    memcpy(buf, data, len);
+
+    return load_buffer(vm, buf, len);
 }

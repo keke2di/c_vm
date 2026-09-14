@@ -6,24 +6,18 @@ cVM compiles a supported subset of Python source into CVM2 bytecode, executes th
 
 **Documentation:** <https://keke2di.github.io/c_vm/>
 
-## cVM v0.2.0
+## cVM v0.2.1
 
-v0.2.0 completes the function model:
+v0.2.1 hardens the standalone executable and extends the type model:
 
-- Functions are first-class values. User-defined and built-in functions can be assigned, passed, returned, stored in collections, and called through any expression.
-- Calls accept keyword arguments.
-- Parameters can have default values.
-- A top-level `def` with a built-in's name replaces that built-in.
-- `print` returns `None` and prints multiple arguments in order.
-- Calling a value that is not a function is a runtime type error.
+- The packed executable loads its program from memory (no temporary file), links the C runtime statically, and imports only `KERNEL32.dll`. It runs on a clean Windows install with no Visual C++ runtime, and carries a version resource and manifest.
+- `bool` and `None` are proper types, `is` / `is not` work, and type objects are supported: `type(x)`, `type(1) is int`, `<class 'int'>`.
 
-It also fixes bugs present in v0.1.0:
+v0.2.0 established the function model: first-class functions, keyword arguments, and default parameter values.
 
-- A `for` loop over a collection nested inside another one ended the outer loop early. Nested loops and nested comprehensions now run correctly.
-- `%` follows Python's sign rules for negative operands.
-- `for ... else`, `while ... else`, `**` inside dict literals, decorators, and type parameters are rejected by the compiler instead of being silently ignored.
+See the [changelog](https://keke2di.github.io/c_vm/CHANGELOG.html) for the full history.
 
-The CVM2 format version is now **3**. Modules compiled with v0.1.0 must be recompiled. Executables packed with v0.1.0 keep working because they carry their own runtime.
+Recompile standalone `.cvm` modules after upgrading. Executables packed with an earlier version keep working because they carry their own runtime.
 
 cVM is **not** intended to implement the full Python language. Unsupported Python features are rejected by the compiler or stopped with a runtime error. See [Compatibility](https://keke2di.github.io/c_vm/COMPATIBILITY.html) for the full support matrix and known differences from Python.
 
@@ -121,7 +115,7 @@ Some constructs are intentionally restricted. For example:
 
 Some supported features behave differently from Python. For example:
 
-- `True` and `False` are the integers `1` and `0`.
+- `True` and `False` print as `True`/`False` but are a subtype of `int` and equal `1`/`0`.
 - `/` between two integers performs integer division.
 - Comparing values other than numbers, strings, bytes, and tuples is a runtime type error, including `x == None`.
 - Lists, tuples, dicts, sets, and bytes print as summaries such as `[list len=3]`.
@@ -234,17 +228,18 @@ python tests/test_runtime_errors.py
 python tests/runtime_stress.py
 ```
 
-The v0.2.0 release passes:
+The v0.2.1 release passes:
 
 ```text
-63 example tests
-20 compiler error tests
+69 example tests
+22 compiler error tests
 14 container validation tests
 8 arithmetic error tests
 12 runtime error tests
 5 runtime stress tests
+5 stub tests
 
-122 passed
+135 passed
 0 failed
 ```
 
@@ -276,8 +271,10 @@ The core runtime and compiler are the focus of this repository. Studio developme
 
 ## Status
 
-**cVM v0.2.0**
+**cVM v0.2.1**
 
+- Standalone executable with no temp file and no Visual C++ runtime dependency
+- `bool`, `None`, `is`, and type objects
 - First-class functions, keyword arguments, and default parameter values
 - Nested loop, nested comprehension, and modulo fixes
 - CVM2 format version 3

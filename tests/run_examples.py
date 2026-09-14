@@ -9,77 +9,25 @@ PACKER = "packer.pack"
 STUB = ROOT / "vm_c" / "stub.exe"
 EXAMPLES = ROOT / "examples"
 OUTPUT = ROOT / "output"
+TIMEOUT = 120
 
 
-EXPECTED_OUTPUT = {
-    "test_app.py": "30\n",
-    "test_append.py": "4\n",
-    "test_augassign.py": "15\n",
-    "test_boolop.py": "1\n",
-    "test_builtins.py": "52\n",
-    "test_builtin_values.py": "5\n1 2 3\n42!\nside\nNone\n2\n",
-    "test_callable_expr.py": "7\n-1\n5\n42\ntruthy\n<function add>\n<built-in function print>\nNone\n",
-    "test_shadow_builtin.py": "42\n99\nNone\n",
-    "test_kwargs.py": "Ada 36 London\nLinus 54 Helsinki\n8\n3\n7\n35\nNone\n",
-    "test_defaults.py": "Hello Ada!\nHello Ada?\nHello Bob.\n9\n15\n7\nempty\ngiven\n2\n12\n6\nNone\n",
-    "test_nested_iteration.py": "1x\n1y\n2x\n2y\n2\n1\n3\n3\n3\n15\nNone\n",
-    "test_mod_negative.py": "2\n-2\n-1\n1\n0\n0.5\n-0.5\n-4\n-4\nNone\n",
-    "test_const.py": "579\n",
-    "test_contains.py": "2\n",
-    "test_continue.py": "18\nNone\n",
-    "test_continue_for.py": "12\nNone\n",
-    "test_continue_for_list.py": "12\nNone\n",
-    "test_dict.py": "1\n",
-    "test_dict_iteration.py": "a\nb\nc\nNone\n",
-    "test_dict_comp.py": "4\n",
-    "test_dict_literal.py": "6\n",
-    "test_enumerate.py": "[list len=2]\n[list len=2]\n[list len=2]\n0\n",
-    "test_enumerate_simple.py": "[list len=3]\n",
-    "test_expression_integration.py": "42\n-2\n42\nNone\n",
-    "test_first_class_function.py": "15\n42\n7\nNone\n",
-    "test_float.py": "5.14\n",
-    "test_float_builtin.py": "3.14\n",
-    "test_for.py": "10\n",
-    "test_for_break.py": "10\n",
-    "test_while.py": "3\n10\nNone\n",
-    "test_func.py": "30\n",
-    "test_recursion.py": "120\nNone\n",
-    "test_recursion_deep.py": "50\nNone\n",
-    "test_int_str.py": "124\n",
-    "test_integration_basic.py": "60\ni\negrat\nNone\n",
-    "test_integration_collections.py": "13\n4\n1\n0\nNone\n",
-    "test_list.py": "4\n",
-    "test_list_comp.py": "7\n",
-    "test_list_index.py": "20\n",
-    "test_nested_continue_outer.py": "42\nNone\n",
-    "test_nested_loops.py": "9\nNone\n",
-    "test_nested_while.py": "8\nNone\n",
-    "test_return_in_loop.py": "4\n0\nNone\n",
-    "test_integration_patterns.py": "9\nhw\n60\nNone\n",
-    "test_mod.py": "1\nNone\n",
-    "test_negative_index.py": "10\n40\n40\n30\n10\nNone\n",
-    "test_list_literal.py": "3\n",
-    "test_plain_list.py": "7\n",
-    "test_print.py": "42\n0\n",
-    "test_set_and_for.py": "9\n",
-    "test_set_comp.py": "3\n",
-    "test_str_return.py": "Hello World\n",
-    "test_strings.py": "Hello World\n0\n",
-    "test_string_index.py": "H\ne\no\no\nl\nNone\n",
-    "test_string_slice.py": "ello\nHello\nWorld\nHello World\nHloWrd\ndlroW olleH\nNone\n",
-    "test_tuple.py": "3\n",
-    "test_vars.py": "30\n",
-    "tet_return_int.py": "42\n",
-    "test_floordiv.py": '3\n-4\nNone\n',
-    "test_pow.py": '256\n27\nNone\n',
-    "test_unary.py": '42\n3.14\n-6\n5\nNone\n',
-    "test_slice.py": "[list len=3]\n"
-                     "[list len=3]\n"
-                     "[list len=4]\n"
-                     "[list len=6]\n"
-                     "[list len=2]\n"
-                     "[list len=6]\n"
-                     "None\n",
+KNOWN_DIFFERENCES = {
+    "test_callable_expr.py": (
+        "7\n-1\n5\n42\ntruthy\n<function add>\n<built-in function print>\n",
+        "function repr has no address",
+    ),
+    "test_enumerate.py": (
+        "[list len=2]\n[list len=2]\n[list len=2]\n0\n",
+        "enumerate yields lists and collections print as summaries",
+    ),
+    "test_enumerate_simple.py": ("[list len=3]\n", "enumerate returns a list"),
+    "test_float.py": ("5.14\n", "floats print with %g instead of the shortest repr"),
+    "test_list_index.py": ("20\n", "list(*items) builds a list from its arguments"),
+    "test_slice.py": (
+        "[list len=3]\n[list len=3]\n[list len=4]\n[list len=6]\n[list len=2]\n[list len=6]\n",
+        "collections print as summaries",
+    ),
 }
 
 
@@ -89,6 +37,7 @@ def run(command, cwd=ROOT):
         cwd=cwd,
         capture_output=True,
         text=True,
+        timeout=TIMEOUT,
     )
 
 
@@ -132,12 +81,13 @@ def run_example(exe):
     return run([str(exe)])
 
 
-def check_example(source):
-    expected = EXPECTED_OUTPUT.get(source.name)
-    expected_runtime_failure = source.name == "test_recursion_limit.py"
+def run_cpython(source):
+    result = run([sys.executable, str(source)])
+    return result.stdout, result.returncode != 0
 
-    if expected is None and not expected_runtime_failure:
-        return False, "missing expected output", ""
+
+def check_example(source):
+    cpython_stdout, cpython_failed = run_cpython(source)
 
     ok, details = compile_example(source)
     if not ok:
@@ -151,19 +101,31 @@ def check_example(source):
 
     exe = OUTPUT / f"{source.stem}.exe"
     result = run_example(exe)
+    cvm_failed = result.returncode != 0
 
-    if result.returncode != 0:
-        if expected_runtime_failure:
-            return True, "expected runtime limit", ""
+    expected_stdout = cpython_stdout
+    expected_failure = cpython_failed
+    note = ""
 
-        return False, "runtime", result.stdout + result.stderr
+    known = KNOWN_DIFFERENCES.get(source.name)
+    if known is not None:
+        if result.stdout == cpython_stdout and cvm_failed == cpython_failed:
+            return False, "matches CPython now; remove it from KNOWN_DIFFERENCES", ""
+        expected_stdout, reason = known
+        expected_failure = False
+        note = f"known difference: {reason}"
 
-    if result.stdout != expected:
+    if cvm_failed != expected_failure:
+        problem = "runtime" if cvm_failed else "expected a runtime failure like CPython"
+        return False, problem, result.stdout + result.stderr
+
+    if result.stdout != expected_stdout:
+        source_of_truth = "Known cVM output" if known is not None else "CPython"
         return False, "output", (
-            f"Expected:\n{expected!r}\nActual:\n{result.stdout!r}\n"
+            f"{source_of_truth}:\n{expected_stdout!r}\ncVM:\n{result.stdout!r}\n"
         )
 
-    return True, "", ""
+    return True, note, ""
 
 
 def main():
@@ -182,14 +144,23 @@ def main():
         print("No examples found.")
         return 1
 
+    stale = sorted(set(KNOWN_DIFFERENCES) - {source.name for source in examples})
+
     passed = 0
     failed = 0
+
+    for name in stale:
+        failed += 1
+        print(f"{name}: FAIL (listed in KNOWN_DIFFERENCES but missing from examples)")
 
     for source in examples:
         if not quiet:
             print(f"Testing {source.name}...", end=" ", flush=True)
 
-        ok, note, details = check_example(source)
+        try:
+            ok, note, details = check_example(source)
+        except subprocess.TimeoutExpired:
+            ok, note, details = False, "timeout", ""
 
         if ok:
             passed += 1

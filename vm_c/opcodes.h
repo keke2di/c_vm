@@ -1,7 +1,7 @@
 #ifndef CVM_OPCODES_H
 #define CVM_OPCODES_H
 
-#define CVM_OPCODE_TABLE_VERSION 3
+#define CVM_OPCODE_TABLE_VERSION 4
 
 typedef enum {
     OP_NOP = 0x00,
@@ -31,6 +31,8 @@ typedef enum {
     OP_COMPARE_GT = 0x24,
     OP_COMPARE_GE = 0x25,
     OP_CONTAINS = 0x26,
+    OP_COMPARE_IS = 0x27,
+    OP_COMPARE_IS_NOT = 0x28,
     OP_JUMP = 0x30,
     OP_JUMP_IF_FALSE = 0x31,
     OP_JUMP_IF_TRUE = 0x32,

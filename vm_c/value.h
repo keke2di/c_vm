@@ -15,6 +15,8 @@ typedef enum {
     TAG_FUNCTION,
     TAG_BYTES,
     TAG_TUPLE,
+    TAG_BOOL,
+    TAG_TYPE,
 } ValueTag;
 
 typedef struct Value Value;
@@ -99,38 +101,36 @@ Value *value_new_list(void);
 Value *value_new_dict(void);
 Value *value_new_set(void);
 Value *value_new_none(void);
+Value *value_true(void);
+Value *value_false(void);
+Value *value_bool(int b);
 Value *value_new_function(FunctionKind kind, uint32_t index, const char *name);
 
 Value *value_retain(Value *v);
 void value_release(Value *v);
 
-int64_t value_as_int(const Value *v);
-double value_as_float(const Value *v);
 
-const char *value_as_string(const Value *v);
 size_t value_string_len(const Value *v);
 
-size_t value_bytes_len(const Value *v);
-const unsigned char *value_bytes_data(const Value *v);
 
-size_t value_list_len(const Value *v);
 Value *value_list_get(const Value *v, size_t idx);
 void value_list_set(Value *v, size_t idx, Value *item);
 int value_list_append(Value *list, Value *item);
 
-size_t value_tuple_len(const Value *v);
 Value *value_tuple_get(const Value *v, size_t idx);
 
 int value_dict_set(Value *dict, Value *key, Value *value);
 Value *value_dict_get(const Value *dict, Value *key);
 Value *value_dict_key_at(const Value *dict, size_t index);
-size_t value_dict_len(const Value *dict);
 
 int value_set_add(Value *set, Value *item);
 int value_set_contains(const Value *set, Value *item);
-size_t value_set_len(const Value *set);
 
+int value_truthy(const Value *v);
 int value_compare(const Value *a, const Value *b);
 char *value_to_string(const Value *v);
+
+Value *value_type_of(const Value *v);
+const char *value_type_name(const Value *v);
 
 #endif

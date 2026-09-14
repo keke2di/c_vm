@@ -36,7 +36,7 @@ cVM aims for predictable behavior, not full Python compatibility. Constructs out
 | Feature | Status | Notes |
 |:--------|:-------|:------|
 | Module-level statements | <span class="label label-green">Supported</span> | Compiled into an entry function. |
-| Module-level `return` | <span class="label label-blue">cVM extension</span> | A packed executable prints the module's return value. A module without `return` prints `None`. |
+| Module-level `return` | <span class="label label-red">Not supported</span> | A `return` outside a function is a compile error. Use `print()` for output. |
 | Top-level `def` | <span class="label label-green">Supported</span> | Functions are hoisted and can be called before their definition in the file. |
 | Nested `def`, closures | <span class="label label-red">Not supported</span> | |
 | `lambda` | <span class="label label-red">Not supported</span> | |
@@ -49,7 +49,7 @@ cVM aims for predictable behavior, not full Python compatibility. Constructs out
 | Type | Status | Notes |
 |:-----|:-------|:------|
 | `None` | <span class="label label-green">Supported</span> | |
-| `bool` | <span class="label label-purple">Differs</span> | `True` and `False` are the integers `1` and `0`. Comparisons and `not` also produce `1` or `0`. |
+| `bool` | <span class="label label-yellow">Partial</span> | A subtype of `int`: `True`/`False` print as `True`/`False` but equal `1`/`0` and behave as integers in arithmetic, indexing, and dict keys. Comparisons, membership, and `not` produce `bool`. |
 | `int` | <span class="label label-yellow">Partial</span> | Signed 64-bit. Overflow is a runtime error; there are no big integers. |
 | `float` | <span class="label label-yellow">Partial</span> | IEEE double precision arithmetic. Printing differs, see [Printing](#printing-and-string-conversion). |
 | `str` | <span class="label label-green">Supported</span> | |
@@ -92,7 +92,7 @@ cVM aims for predictable behavior, not full Python compatibility. Constructs out
 | List or tuple concatenation, sequence repetition | <span class="label label-red">Not supported</span> | |
 | `== != < <= > >=` | <span class="label label-yellow">Partial</span> | Numbers, strings and bytes. Tuples with `==` and `!=` only. Comparing other types is a runtime type error, including `x == None`, lists, dicts and functions. |
 | Chained comparisons `a < b < c` | <span class="label label-red">Not supported</span> | |
-| `is`, `is not` | <span class="label label-red">Not supported</span> | |
+| `is`, `is not` | <span class="label label-green">Supported</span> | Identity comparison; `None`, `True`, `False`, and type objects are singletons. |
 | `in`, `not in` | <span class="label label-green">Supported</span> | Lists, tuples, strings, bytes, dict keys, sets. |
 | `and`, `or`, `not` | <span class="label label-green">Supported</span> | `and` and `or` return one of their operands, as in Python. |
 | Unary `-`, `+`, `~` | <span class="label label-green">Supported</span> | `~` on integers only. |
@@ -152,7 +152,8 @@ cVM aims for predictable behavior, not full Python compatibility. Constructs out
 | `enumerate(items)` | <span class="label label-purple">Differs</span> | Lists only. Returns a list of `[index, item]` lists. |
 | `append(items, value)` | <span class="label label-blue">cVM extension</span> | Same as `items.append(value)`. |
 | `range(...)` | <span class="label label-yellow">Partial</span> | Only directly as the iterable of a `for` statement. |
-| Other built-ins (`abs`, `min`, `max`, `sum`, `zip`, `sorted`, `isinstance`, `type`, `input`, `open`, ...) | <span class="label label-red">Not supported</span> | |
+| `type(x)` | <span class="label label-green">Supported</span> | Returns the object's type; `type(1) is int`. The built-in type names are type objects. |
+| Other built-ins (`abs`, `min`, `max`, `sum`, `zip`, `sorted`, `isinstance`, `input`, `open`, ...) | <span class="label label-red">Not supported</span> | |
 
 ## Methods
 
@@ -170,7 +171,7 @@ cVM aims for predictable behavior, not full Python compatibility. Constructs out
 | Value | Text |
 |:------|:-----|
 | `int` | `42` |
-| `bool` | `1` or `0` |
+| `bool` | `True` or `False` |
 | `float` | C `%g` format with up to 6 significant digits: `1.0` prints `1`, `2.5` prints `2.5`, `1e20` prints `1e+20`, `0.1 + 0.2` prints `0.3` |
 | `str` | The text itself |
 | `None` | `None` |

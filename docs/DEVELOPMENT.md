@@ -91,12 +91,13 @@ python tests/run_all.py
 
 | Suite | Covers | Tests |
 |:------|:-------|------:|
-| `tests/run_examples.py` | Compiles, packs, and runs every program in `examples/`, comparing output | 63 |
-| `tests/test_compiler_errors.py` | Unsupported or invalid source is rejected with the expected error | 20 |
+| `tests/run_examples.py` | Compiles, packs, and runs every program in `examples/`, comparing output against CPython | 69 |
+| `tests/test_compiler_errors.py` | Unsupported or invalid source is rejected with the expected error | 22 |
 | `tests/test_container_errors.py` | Malformed CVM2 containers are rejected | 14 |
 | `tests/test_arithmetic_errors.py` | Integer overflow is reported | 8 |
 | `tests/test_runtime_errors.py` | Call and argument binding errors are reported | 12 |
 | `tests/runtime_stress.py` | Deep recursion and large collections | 5 |
+| `tests/test_stub.py` | The packed executable imports only KERNEL32, uses no temp file, and matches CPython | 5 |
 
 Each suite can also run on its own. Pass `--quiet` to print only failures and the summary line.
 

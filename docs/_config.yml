@@ -42,7 +42,7 @@ callouts:
     title: Warning
     color: red
   new:
-    title: New in v0.2.0
+    title: New in v0.2.1
     color: green
 
 defaults:

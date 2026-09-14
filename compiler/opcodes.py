@@ -30,6 +30,8 @@ CANONICAL_OPCODES = {
     "COMPARE_GT":       0x24,
     "COMPARE_GE":       0x25,
     "CONTAINS":         0x26,
+    "COMPARE_IS":       0x27,
+    "COMPARE_IS_NOT":   0x28,
 
     "JUMP":             0x30,
     "JUMP_IF_FALSE":    0x31,
@@ -103,7 +105,7 @@ def operand_width_for_code(op: int) -> int:
 
 OPERAND_WIDTH = operand_width_for_code
 
-OPCODE_TABLE_VERSION = 3
+OPCODE_TABLE_VERSION = 4
 
 _globals = globals()
 for _name, _value in OPCODES.items():
