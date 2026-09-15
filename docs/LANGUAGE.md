@@ -167,13 +167,13 @@ else:
 | Kind | Operators |
 |:-----|:----------|
 | Arithmetic | `+` `-` `*` `/` `//` `%` `**` |
-| Bitwise | `&` `\|` `^` `<<` `>>` `~` |
+| Bitwise | `&` <code>&#124;</code> `^` `<<` `>>` `~` |
 | Comparison | `==` `!=` `<` `<=` `>` `>=` |
 | Membership | `in` `not in` |
 | Identity | `is` `is not` |
 | Boolean | `and` `or` `not` |
 | Unary | `+` `-` `~` |
-| Augmented assignment | `+=` `-=` `*=` `/=` `//=` `%=` `**=` `&=` `\|=` `^=` `<<=` `>>=` |
+| Augmented assignment | `+=` `-=` `*=` `/=` `//=` `%=` `**=` `&=` <code>&#124;=</code> `^=` `<<=` `>>=` |
 
 - `/` is true division and always returns a `float`; use `//` for floor division.
 - `+` and `*` also concatenate and repeat `list`, `tuple`, `str`, and `bytes`.

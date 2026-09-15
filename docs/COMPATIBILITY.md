@@ -56,7 +56,7 @@ cVM aims for predictable behavior and, within the supported subset, output that 
 | `list` | <span class="label label-green">Supported</span> | |
 | `tuple` | <span class="label label-green">Supported</span> | |
 | `dict` | <span class="label label-green">Supported</span> | Any hashable key. Lookup, `d[k] = v`, `del`, `in`, `len`, iteration, `.get()`, `.keys()`, `.values()`, `.items()`. |
-| `set` | <span class="label label-green">Supported</span> | Literals, `in`, `len`, iteration, all 17 methods, and the `\|` `&` `-` `^` operators with subset/superset comparisons. Iteration order is insertion order, not Python's hash order. |
+| `set` | <span class="label label-green">Supported</span> | Literals, `in`, `len`, iteration, all 17 methods, and the <code>&#124;</code> `&` `-` `^` operators with subset/superset comparisons. Iteration order is insertion order, not Python's hash order. |
 | `frozenset` | <span class="label label-green">Supported</span> | Hashable; usable as a dict key or set element. |
 | `range` | <span class="label label-green">Supported</span> | A lazy object: indexing, `len`, `in`, `==`, iteration, negative steps. |
 | Dict views | <span class="label label-green">Supported</span> | `dict.keys()`, `.values()`, `.items()` are live views. |
@@ -90,7 +90,7 @@ cVM aims for predictable behavior and, within the supported subset, output that 
 | Literals | <span class="label label-green">Supported</span> | Numbers, strings, bytes, `None`, `True`, `False`, lists, tuples, sets, dicts. Complex numbers are not supported. |
 | `+ - * / // % **` | <span class="label label-green">Supported</span> | `+`/`*` also concatenate and repeat sequences. `//` and `%` follow Python's sign rules. |
 | `/` | <span class="label label-green">Supported</span> | True division; always returns a `float` (`7 / 2` is `3.5`). |
-| `& \| ^ << >> ~` | <span class="label label-green">Supported</span> | Integers only. Shifts reject negative counts and detect 64-bit overflow. |
+| `&` <code>&#124;</code> `^` `<<` `>>` `~` | <span class="label label-green">Supported</span> | Integers only. Shifts reject negative counts and detect 64-bit overflow. |
 | `== != < <= > >=` | <span class="label label-green">Supported</span> | `==`/`!=` compare by value across all types and never raise (`x == None` is `False`). Ordering works on numbers, strings, bytes, lists, and tuples; mismatched types raise. |
 | Chained comparisons `a < b < c` | <span class="label label-green">Supported</span> | Single evaluation and short-circuiting, as in Python. |
 | `is`, `is not` | <span class="label label-green">Supported</span> | Identity comparison. |
@@ -185,7 +185,7 @@ Every public method of `str`, `bytes`, `list`, `dict`, `set`, and `frozenset` is
 | Formatting | `format`, `format_map`, `encode` / `decode` | See [Formatting](#formatting). |
 | `list` | `append`, `extend`, `insert`, `pop`, `remove`, `clear`, `index`, `count`, `reverse`, `copy`, `sort` | `sort` takes `key=`/`reverse=` and is stable. |
 | `dict` | `get`, `keys`, `values`, `items`, `pop`, `popitem`, `setdefault`, `update`, `clear`, `copy`, `fromkeys` | `setdefault` returns the stored object, so `d.setdefault(k, []).append(x)` works. |
-| `set` / `frozenset` | `add`, `remove`, `discard`, `pop`, `clear`, `copy`, `update`, `union`, `intersection`, `difference`, `symmetric_difference`, the `_update` forms, `issubset`, `issuperset`, `isdisjoint` | `frozenset` has the eight non-mutating ones. Operators `\|`, `&`, `-`, `^` and subset/superset comparisons work; the result type follows the left operand. |
+| `set` / `frozenset` | `add`, `remove`, `discard`, `pop`, `clear`, `copy`, `update`, `union`, `intersection`, `difference`, `symmetric_difference`, the `_update` forms, `issubset`, `issuperset`, `isdisjoint` | `frozenset` has the eight non-mutating ones. Operators <code>&#124;</code>, `&`, `-`, `^` and subset/superset comparisons work; the result type follows the left operand. |
 
 `str.maketrans`, `bytes.maketrans`, `bytes.fromhex`, and `dict.fromkeys` can be called on the type object (`str.maketrans("ab", "xy")`) or on an instance, as in Python.
 

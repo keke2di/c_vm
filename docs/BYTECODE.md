@@ -79,7 +79,7 @@ Values are reference-counted by the native runtime. In the tables below, the sta
 | `UNARY_POS` | `0x19` | a → result | `+a` |
 | `UNARY_INVERT` | `0x1A` | a → result | `~a`, integers only |
 | `BINARY_AND` | `0x1B` | a b → result | `a & b`, integers only |
-| `BINARY_OR` | `0x1C` | a b → result | `a \| b`, integers only |
+| `BINARY_OR` | `0x1C` | a b → result | <code>a &#124; b</code>, integers only |
 | `BINARY_XOR` | `0x1D` | a b → result | `a ^ b`, integers only |
 | `BINARY_LSHIFT` | `0x1E` | a b → result | `a << b`; rejects negative counts and detects overflow |
 | `BINARY_RSHIFT` | `0x1F` | a b → result | `a >> b`; rejects negative counts |
