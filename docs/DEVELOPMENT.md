@@ -35,6 +35,7 @@ Build from an MSVC Developer Command Prompt or Developer PowerShell. From a regu
 | `compiler/` | Python compiler: AST to bytecode, constant pool, symbol tables, emitter, opcode table, CVM2 writer, command line |
 | `vm_c/` | Native VM, split per area: loader, interpreter, value model, operators, iteration, built-ins, constructors, methods, codecs, executable stub, build script |
 | `packer/` | Appends a compiled module to the VM stub |
+| `tools/` | Generators run by hand, not by the build: `gen_unicode.py` writes `vm_c/unicode_data.h` from CPython's `unicodedata` |
 | `examples/` | Example programs, also used as regression tests |
 | `tests/` | Test suites |
 | `docs/` | This documentation site |
@@ -91,11 +92,11 @@ python tests/run_all.py
 
 | Suite | Covers | Tests |
 |:------|:-------|------:|
-| `tests/run_examples.py` | Compiles, packs, and runs every program in `examples/`, comparing output against CPython | 100 |
+| `tests/run_examples.py` | Compiles, packs, and runs every program in `examples/`, comparing output against CPython | 112 |
 | `tests/test_compiler_errors.py` | Unsupported or invalid source is rejected with the expected error | 18 |
 | `tests/test_container_errors.py` | Malformed CVM2 containers are rejected | 14 |
 | `tests/test_arithmetic_errors.py` | Integer overflow is reported | 7 |
-| `tests/test_runtime_errors.py` | Call, value, and runtime errors are reported | 31 |
+| `tests/test_runtime_errors.py` | Call, value, and runtime errors are reported | 98 |
 | `tests/runtime_stress.py` | Deep recursion and large collections | 5 |
 | `tests/test_stub.py` | The packed executable imports only KERNEL32, uses no temp file, and matches CPython | 5 |
 
@@ -107,7 +108,7 @@ Each suite can also run on its own. Pass `--quiet` to print only failures and th
 
 1. **Compiler.** Compile the new AST node in `compiler/compiler.py`, or reject it with a `CompileError`.
 2. **Opcodes.** For a new instruction, add it to `compiler/opcodes.py` and regenerate the C header with `python -m compiler.opcodes`.
-3. **VM.** Implement it in `vm_c/vm.c`. Validate operands and types, and set a VM error instead of crashing.
+3. **VM.** Implement it in the matching `vm_c/` file — operators in `ops_*.c`, built-ins in `builtins_*.c`, methods in `methods_*.c`, text helpers in `strtext.c`. Validate operands and types, and set a VM error instead of crashing.
 4. **Format.** If the module layout changes, bump `FORMAT_VERSION` in `compiler/crypto.py` and the version check in `vm_c/loader.c`.
 5. **Tests.** Add an example with its expected output to `tests/run_examples.py`, and negative cases to the error suites.
 6. **Docs.** Update the [Language Reference](LANGUAGE.md), [Compatibility](COMPATIBILITY.md), and [Changelog](CHANGELOG.md).

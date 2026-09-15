@@ -178,6 +178,10 @@ int value_dict_delete(Value *dict, const Value *key);
 
 int value_set_add(Value *set, Value *item);
 int value_set_contains(const Value *set, Value *item);
+int value_set_discard(Value *set, const Value *item);
+
+int value_list_insert(Value *list, int64_t index, Value *item);
+Value *value_list_remove_at(Value *list, int64_t index);
 
 int value_truthy(const Value *v);
 int value_compare(const Value *a, const Value *b);

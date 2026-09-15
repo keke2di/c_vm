@@ -6,21 +6,21 @@ cVM compiles a supported subset of Python source into CVM2 bytecode, executes th
 
 **Documentation:** <https://keke2di.github.io/c_vm/>
 
-## cVM v0.2.2
+## cVM v0.3.0
 
-v0.2.2 is a large step toward the Python subset. Within the supported subset, output now matches CPython 3.14, including `repr`/`str` text, Unicode strings, and shortest-round-trip floats.
+v0.3.0 completes the built-in method surfaces. Every public method of `str`, `bytes`, `list`, `dict`, `set`, and `frozenset` is implemented — 136 in total — and matches CPython 3.14 for the supported argument forms.
 
-- **Iteration:** a real iterator protocol, lazy `range`, `enumerate`, `zip`, `map`, `filter`, `reversed`, `iter`/`next`, and `for`/`while ... else`.
-- **Operators:** bitwise `& | ^ << >> ~`, sequence concatenation and repetition, and chained comparisons. `/` is now true division (always a float).
-- **Syntax:** conditional expressions, unpacking assignment, augmented assignment to subscripts, `del`, comprehensions with `if` and multiple `for` clauses, and f-strings.
-- **Built-ins:** `abs`, `divmod`, `pow`, `round`, `sum`, `min`, `max`, `sorted`, `any`, `all`, `isinstance`, `callable`, `id`, `ord`, `chr`, `bin`, `oct`, `hex`, `format`, `ascii`, and more, plus keyword arguments for built-ins and methods.
-- **Types:** `frozenset`, `dict` views (`keys`/`values`/`items`), container constructors from any iterable, and text codecs (`utf-8`, `utf-8-sig`, `ascii`, `latin-1`).
+- **`str` (all 47) and `bytes` (all 42) methods:** searching, splitting and joining, case conversion, padding, the `is*` predicates, `translate`/`maketrans`, and `hex`/`fromhex`.
+- **`str.format` and `str.format_map`:** automatic and manual field numbering, `[index]`/`[key]` access, `!r`/`!s`/`!a`, and nested specs.
+- **`list`, `dict`, `set` methods:** the full surfaces, including a stable `list.sort`, `dict.setdefault`/`fromkeys`, and the complete set algebra.
+- **Set and dict operators:** `|`, `&`, `-`, `^`, subset/superset comparisons, `|` on dicts, and the augmented forms.
+- **Unicode tables** generated from CPython's `unicodedata` (Unicode 16.0.0) and verified against it for all 1,114,112 code points, so case conversion, character properties, and `repr` escaping match Python.
 
 The packed executable still loads from memory, links the C runtime statically, and imports only `KERNEL32.dll`.
 
 See the [changelog](https://keke2di.github.io/c_vm/CHANGELOG.html) for the full history.
 
-Recompile standalone `.cvm` modules after upgrading. Executables packed with an earlier version keep working because they carry their own runtime.
+**No recompile needed.** The CVM2 container format (version 3) and the instruction set are unchanged since v0.2.2, so existing `.cvm` modules run on this release as they are.
 
 cVM is **not** intended to implement the full Python language. Unsupported Python features are rejected by the compiler or stopped with a runtime error. See [Compatibility](https://keke2di.github.io/c_vm/COMPATIBILITY.html) for the full support matrix and known differences from Python.
 
@@ -81,7 +81,7 @@ The compiler currently supports:
 - Keyword arguments and default parameter values
 - Functions as values, including built-in functions
 - Calls on any expression that evaluates to a function
-- Method calls (`list.append`, `dict.get`, `set.add`)
+- Method calls: every public method of `str`, `bytes`, `list`, `dict`, `set`, and `frozenset`
 - `if` / `elif` / `else`
 - `while`
 - `for`, including nested loops
@@ -230,18 +230,18 @@ python tests/test_runtime_errors.py
 python tests/runtime_stress.py
 ```
 
-The v0.2.2 release passes:
+The v0.3.0 release passes:
 
 ```text
-100 example tests
+112 example tests
 18 compiler error tests
 14 container validation tests
 7 arithmetic error tests
-31 runtime error tests
+98 runtime error tests
 5 runtime stress tests
 5 stub tests
 
-180 passed
+259 passed
 0 failed
 ```
 
@@ -273,15 +273,16 @@ The core runtime and compiler are the focus of this repository. Studio developme
 
 ## Status
 
-**cVM v0.2.2**
+**cVM v0.3.0**
 
+- All 136 public methods of `str`, `bytes`, `list`, `dict`, `set`, and `frozenset`
+- `str.format` and `str.format_map`, plus set and dict operators
+- Unicode 16.0.0 tables generated from CPython and verified for every code point
 - Output matches CPython 3.14 across the supported subset: `repr`/`str`, Unicode strings, shortest-round-trip floats
 - Real iteration: `range`, `enumerate`, `zip`, `map`, `filter`, `reversed`, iterators, `for`/`while ... else`
 - Bitwise and chained-comparison operators, true division, sequence concatenation and repetition
 - Unpacking, augmented assignment to subscripts, `del`, conditional expressions, f-strings, richer comprehensions
-- Many built-in functions and keyword arguments for built-ins and methods
-- `frozenset`, dict views, container constructors from iterables, and text codecs
-- CVM2 format version 3
+- CVM2 format version 3, unchanged since v0.2.0
 - Regression and negative tests passing
 
 Future versions will continue to widen the supported Python subset while keeping unsupported behavior explicit.

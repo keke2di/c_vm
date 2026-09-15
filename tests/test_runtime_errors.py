@@ -262,6 +262,485 @@ frozenset().add(1)
         "Attribute error",
         "",
     ),
+    "list_pop_empty": (
+        """
+[].pop()
+""",
+        "Bounds error",
+        "",
+    ),
+    "list_remove_missing": (
+        """
+print([1, 2].remove(2))
+[1, 2].remove(9)
+""",
+        "Value error",
+        "None\n",
+    ),
+    "list_index_missing": (
+        """
+[1, 2, 3].index(9)
+""",
+        "Value error",
+        "",
+    ),
+    "set_remove_missing": (
+        """
+{1, 2}.remove(9)
+""",
+        "Key error",
+        "",
+    ),
+    "set_pop_empty": (
+        """
+set().pop()
+""",
+        "Key error",
+        "",
+    ),
+    "dict_popitem_empty": (
+        """
+{}.popitem()
+""",
+        "Key error",
+        "",
+    ),
+    "set_op_non_set": (
+        """
+print({1, 2} | {3})
+{1} & [2]
+""",
+        "Type error",
+        "{1, 2, 3}\n",
+    ),
+    "dict_or_non_dict": (
+        """
+{"a": 1} | [1]
+""",
+        "Type error",
+        "",
+    ),
+    "split_empty_sep": (
+        """
+print("a,b".split(","))
+"abc".split("")
+""",
+        "Value error",
+        "['a', 'b']\n",
+    ),
+    "rsplit_empty_sep": (
+        """
+"abc".rsplit("")
+""",
+        "Value error",
+        "",
+    ),
+    "partition_empty_sep": (
+        """
+"abc".partition("")
+""",
+        "Value error",
+        "",
+    ),
+    "join_non_str": (
+        """
+print(",".join(["a", "b"]))
+",".join(["a", 1])
+""",
+        "Type error",
+        "a,b\n",
+    ),
+    "strip_non_str": (
+        """
+"abc".strip(1)
+""",
+        "Type error",
+        "",
+    ),
+    "find_non_str": (
+        """
+"abc".find(1)
+""",
+        "Type error",
+        "",
+    ),
+    "startswith_non_str": (
+        """
+"abc".startswith(1)
+""",
+        "Type error",
+        "",
+    ),
+    "str_index_missing": (
+        """
+print("abc".find("z"))
+"abc".index("z")
+""",
+        "Value error",
+        "-1\n",
+    ),
+    "replace_non_str": (
+        """
+"abc".replace("a", 1)
+""",
+        "Type error",
+        "",
+    ),
+    "bytes_find_int_too_big": (
+        """
+print(b"abc".find(98))
+b"abc".find(300)
+""",
+        "Value error",
+        "1\n",
+    ),
+    "bytes_find_int_negative": (
+        """
+b"abc".find(-1)
+""",
+        "Value error",
+        "",
+    ),
+    "bytes_startswith_int": (
+        """
+b"abc".startswith(97)
+""",
+        "Type error",
+        "",
+    ),
+    "bytes_replace_int": (
+        """
+b"abc".replace(97, b"Z")
+""",
+        "Type error",
+        "",
+    ),
+    "bytes_strip_int": (
+        """
+b"abc".strip(98)
+""",
+        "Type error",
+        "",
+    ),
+    "bytes_find_str_needle": (
+        """
+b"abc".find("b")
+""",
+        "Type error",
+        "",
+    ),
+    "str_find_bytes_needle": (
+        """
+"abc".find(b"b")
+""",
+        "Type error",
+        "",
+    ),
+    "bytes_center_wide_fill": (
+        """
+b"abc".center(7, b"--")
+""",
+        "Type error",
+        "",
+    ),
+    "bytes_center_str_fill": (
+        """
+b"abc".center(7, "-")
+""",
+        "Type error",
+        "",
+    ),
+    "bytes_join_non_bytes": (
+        """
+print(b",".join([b"a", b"b"]))
+b",".join(["a"])
+""",
+        "Type error",
+        "b'a,b'\n",
+    ),
+    "bytes_split_empty_sep": (
+        """
+b"abc".split(b"")
+""",
+        "Value error",
+        "",
+    ),
+    "bytes_index_missing": (
+        """
+print(b"abc".find(b"z"))
+b"abc".index(b"z")
+""",
+        "Value error",
+        "-1\n",
+    ),
+    "translate_none_table": (
+        """
+"abc".translate(None)
+""",
+        "Type error",
+        "",
+    ),
+    "translate_bad_value": (
+        """
+"abc".translate({97: [1]})
+""",
+        "Type error",
+        "",
+    ),
+    "translate_ord_out_of_range": (
+        """
+print("abc".translate({97: 90}))
+"abc".translate({97: 1114112})
+""",
+        "Value error",
+        "Zbc\n",
+    ),
+    "bytes_translate_short_table": (
+        """
+b"abc".translate(b"xy")
+""",
+        "Value error",
+        "",
+    ),
+    "maketrans_unequal_lengths": (
+        """
+str.maketrans("ab", "xyz")
+""",
+        "Value error",
+        "",
+    ),
+    "maketrans_single_str_arg": (
+        """
+str.maketrans("ab")
+""",
+        "Type error",
+        "",
+    ),
+    "maketrans_multichar_key": (
+        """
+str.maketrans({"ab": "X"})
+""",
+        "Value error",
+        "",
+    ),
+    "maketrans_non_str": (
+        """
+str.maketrans(1, 2)
+""",
+        "Type error",
+        "",
+    ),
+    "bytes_maketrans_unequal": (
+        """
+bytes.maketrans(b"ab", b"xyz")
+""",
+        "Value error",
+        "",
+    ),
+    "bytes_maketrans_str_args": (
+        """
+bytes.maketrans("ab", "xy")
+""",
+        "Type error",
+        "",
+    ),
+    "fromhex_odd_length": (
+        """
+bytes.fromhex("6")
+""",
+        "Value error",
+        "",
+    ),
+    "fromhex_split_pair": (
+        """
+bytes.fromhex("6 1")
+""",
+        "Value error",
+        "",
+    ),
+    "fromhex_non_hex": (
+        """
+bytes.fromhex("zz")
+""",
+        "Value error",
+        "",
+    ),
+    "fromkeys_unhashable": (
+        """
+dict.fromkeys([[1]])
+""",
+        "Type error",
+        "",
+    ),
+    "fromkeys_non_iterable": (
+        """
+dict.fromkeys(5)
+""",
+        "Type error",
+        "",
+    ),
+    "fromkeys_value_keyword": (
+        """
+dict.fromkeys([1], value=0)
+""",
+        "Type error",
+        "",
+    ),
+    "unknown_static_method": (
+        """
+str.nosuchmethod()
+""",
+        "Attribute error",
+        "",
+    ),
+    "format_mixed_numbering": (
+        """
+print("{} {}".format(1, 2))
+"{0} {}".format(1, 2)
+""",
+        "Value error",
+        "1 2\n",
+    ),
+    "format_mixed_numbering_reverse": (
+        """
+"{} {1}".format(1, 2)
+""",
+        "Value error",
+        "",
+    ),
+    "format_missing_positional": (
+        """
+"{}".format()
+""",
+        "Bounds error",
+        "",
+    ),
+    "format_index_out_of_range": (
+        """
+"{2}".format(1)
+""",
+        "Bounds error",
+        "",
+    ),
+    "format_missing_keyword": (
+        """
+"{k}".format()
+""",
+        "Key error",
+        "",
+    ),
+    "format_unmatched_open": (
+        """
+"a{".format()
+""",
+        "Value error",
+        "",
+    ),
+    "format_unmatched_close": (
+        """
+"a}".format()
+""",
+        "Value error",
+        "",
+    ),
+    "format_bad_conversion": (
+        """
+"{!z}".format(1)
+""",
+        "Value error",
+        "",
+    ),
+    "format_long_conversion": (
+        """
+"{!rr}".format(1)
+""",
+        "Value error",
+        "",
+    ),
+    "format_space_name": (
+        """
+"{ }".format()
+""",
+        "Key error",
+        "",
+    ),
+    "format_empty_accessor": (
+        """
+"{0[]}".format([1])
+""",
+        "Value error",
+        "",
+    ),
+    "format_accessor_out_of_range": (
+        """
+"{0[2]}".format([1])
+""",
+        "Bounds error",
+        "",
+    ),
+    "format_accessor_missing_key": (
+        """
+"{0[z]}".format({"a": 1})
+""",
+        "Key error",
+        "",
+    ),
+    "format_string_key_on_list": (
+        """
+"{0[-1]}".format([1, 2])
+""",
+        "Type error",
+        "",
+    ),
+    "format_attribute_access": (
+        """
+"{0.real}".format(5)
+""",
+        "Attribute error",
+        "",
+    ),
+    "format_nested_depth": (
+        """
+"{:{:{}}}".format(1, 2, 3)
+""",
+        "Value error",
+        "",
+    ),
+    "format_nested_missing_arg": (
+        """
+"{:{}}".format(7)
+""",
+        "Bounds error",
+        "",
+    ),
+    "format_map_positional": (
+        """
+"{0}".format_map({"0": 1})
+""",
+        "Value error",
+        "",
+    ),
+    "format_map_auto": (
+        """
+"{}".format_map({})
+""",
+        "Value error",
+        "",
+    ),
+    "format_map_non_mapping": (
+        """
+"{k}".format_map([1])
+""",
+        "Type error",
+        "",
+    ),
+    "format_map_missing_key": (
+        """
+"{k}".format_map({})
+""",
+        "Key error",
+        "",
+    ),
 }
 
 

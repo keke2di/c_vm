@@ -540,6 +540,11 @@ static void binary_bitop(VM *vm, uint8_t op, const Value *a, const Value *b) {
     }
 }
 
+static int is_set_operator(uint8_t op) {
+    return op == OP_BINARY_OR || op == OP_BINARY_AND ||
+           op == OP_BINARY_XOR || op == OP_BINARY_SUB;
+}
+
 void op_binary(VM *vm, uint8_t op) {
     Value *b = vm_pop(vm);
     Value *a = vm_pop(vm);
@@ -548,6 +553,22 @@ void op_binary(VM *vm, uint8_t op) {
         if (a) value_release(a);
         if (b) value_release(b);
         vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    if (is_set_operator(op) && is_setlike(a) && is_setlike(b)) {
+        Value *result = set_binary_op(vm, op, a, b);
+        if (result) vm_push_owned(vm, result);
+        value_release(a);
+        value_release(b);
+        return;
+    }
+
+    if (op == OP_BINARY_OR && a->tag == TAG_DICT && b->tag == TAG_DICT) {
+        Value *result = value_dict_union(vm, a, b);
+        if (result) vm_push_owned(vm, result);
+        value_release(a);
+        value_release(b);
         return;
     }
 

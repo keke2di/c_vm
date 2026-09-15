@@ -157,4 +157,4 @@ The runtime accepts only the format version it was built for.
 The container format has stayed at version 3 since v0.2.0. Later releases have added instructions and runtime types without changing the container layout or the serialized constant tags, so the loader still accepts format version 3.
 
 {: .note }
-The instruction set does change between releases. A `.cvm` module runs only on a matching runtime, so recompile modules after upgrading. Packed executables are not affected, because each one carries the runtime it was built with.
+The instruction set can change between releases, and when it does, a `.cvm` module runs only on a matching runtime. **v0.3.0 did not change it:** both the container format (3) and the instruction set are unchanged since v0.2.2, so modules compiled with v0.2.2 run on v0.3.0 without recompiling. Packed executables are never affected either way, because each one carries the runtime it was built with.

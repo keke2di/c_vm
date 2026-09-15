@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "unicode.h"
 #include "value.h"
 
 #define REPR_MAX_DEPTH 64
@@ -197,9 +198,15 @@ static void write_quoted(Buffer *b, const char *text, size_t len, int is_bytes, 
     while (i < len) {
         unsigned char c = (unsigned char)text[i];
 
-        if (!is_bytes && ascii && c >= 0x80) {
+        if (!is_bytes && c >= 0x80) {
+            size_t start = i;
             uint32_t cp = decode_codepoint(text, len, &i);
-            write_escaped_codepoint(b, cp);
+
+            if (ascii || !uni_is_printable(cp)) {
+                write_escaped_codepoint(b, cp);
+            } else {
+                buffer_append(b, text + start, i - start);
+            }
             continue;
         }
 

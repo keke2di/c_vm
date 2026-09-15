@@ -10,11 +10,40 @@ description: "Changes in each cVM release."
 Changes in each cVM release.
 {: .fs-6 .fw-300 }
 
-## v0.2.2
+## v0.3.0
 {: .d-inline-block }
 
 Latest
 {: .label .label-green }
+
+Complete `str` and `bytes` method surfaces, backed by generated Unicode tables. Every public method of `str`, `bytes`, `list`, `dict`, `set`, and `frozenset` is now implemented — 136 in total — and matches CPython 3.14 for the supported argument forms.
+
+### Added
+
+- **Unicode support tables** generated from CPython's own `unicodedata` (Unicode 16.0.0) and verified against it for all 1,114,112 code points: character properties, case mapping including special casing (`"ß".upper()` is `"SS"`, `"ﬃ".upper()` is `"FFI"`), and decimal digit values.
+- **`str` methods (all 47).** Searching (`find`, `rfind`, `index`, `rindex`, `count`, `startswith`, `endswith`), editing (`replace`, `strip`, `lstrip`, `rstrip`, `removeprefix`, `removesuffix`), splitting and joining (`split`, `rsplit`, `splitlines`, `join`, `partition`, `rpartition`), case conversion (`upper`, `lower`, `casefold`, `capitalize`, `title`, `swapcase`), padding (`center`, `ljust`, `rjust`, `zfill`, `expandtabs`), the twelve `is*` predicates, and `translate`/`maketrans`.
+- **`str.format` and `str.format_map`**, with automatic and manual field numbering, `[index]` and `[key]` access, `!r`/`!s`/`!a` conversions, nested format specs (`"{:{}}"`), and the full format-spec mini-language already used by f-strings.
+- **`bytes` methods (all 42)**, mirroring `str` on byte indices with ASCII-only case rules, plus `hex()`, `fromhex()`, `translate`, and `maketrans`. `find`, `rfind`, `index`, `rindex`, and `count` also accept an integer.
+- **`list`, `dict`, and `set` methods.** `list.extend/insert/pop/remove/clear/index/count/reverse/copy/sort`; `dict.pop/popitem/setdefault/update/clear/copy/fromkeys`; the full `set` and `frozenset` algebra (`union`, `intersection`, `difference`, `symmetric_difference`, their `_update` forms, `issubset`, `issuperset`, `isdisjoint`, `add`, `remove`, `discard`, `pop`).
+- **Set and dict operators.** `|`, `&`, `-`, `^` on sets and frozensets, subset and superset comparisons with `<`, `<=`, `>`, `>=`, `|` on dicts, and the augmented forms. The result type follows the left operand.
+- **Methods on type objects.** `str.maketrans(...)`, `bytes.fromhex(...)`, and `dict.fromkeys(...)` can be called on the type as well as on an instance.
+
+### Changed
+
+- `repr` now escapes non-printable non-ASCII characters (`repr("a​b")` is `'a\\u200bb'`), while printable non-ASCII text stays as itself (`repr("café")` is `'café'`).
+- `int()` and `float()` accept the 760 Unicode decimal digits, so `int("１２")` is `12`. `bytes` input keeps the ASCII-only rules.
+- `list.sort` is stable and shares its implementation with `sorted`, so `key=` and `reverse=` behave identically.
+
+### Compatibility
+
+{: .important }
+**No recompile needed.** The CVM2 container format stays at version 3 and the instruction set is unchanged since v0.2.2, so modules compiled with v0.2.2 load and run on this release unmodified. This is the first cVM release that does not require recompiling `.cvm` modules. Programs that print non-printable non-ASCII text through `repr` will see the new escaping.
+
+## v0.2.2
+{: .d-inline-block }
+
+Released
+{: .label }
 
 A large step toward the Python subset: real iteration, more operators, more syntax, and many built-ins. `print` and `str` now match CPython's `repr`/`str` output, including Unicode text and shortest-round-trip floats.
 

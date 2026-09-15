@@ -1,28 +1,6 @@
 #include <string.h>
 #include "vm_internal.h"
 
-enum {
-    TYPE_INT,
-    TYPE_FLOAT,
-    TYPE_STR,
-    TYPE_BOOL,
-    TYPE_LIST,
-    TYPE_TUPLE,
-    TYPE_DICT,
-    TYPE_SET,
-    TYPE_BYTES,
-    TYPE_NONE,
-    TYPE_TYPE,
-    TYPE_FUNCTION,
-    TYPE_BUILTIN_FN,
-    TYPE_RANGE,
-    TYPE_ITERATOR,
-    TYPE_FROZENSET,
-    TYPE_DICT_KEYS,
-    TYPE_DICT_VALUES,
-    TYPE_DICT_ITEMS
-};
-
 static Value g_type_int         = { TAG_TYPE, UINT32_MAX, { TYPE_INT } };
 static Value g_type_float       = { TAG_TYPE, UINT32_MAX, { TYPE_FLOAT } };
 static Value g_type_str         = { TAG_TYPE, UINT32_MAX, { TYPE_STR } };

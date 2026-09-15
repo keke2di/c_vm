@@ -17,7 +17,7 @@ A small Python-like language runtime: a bytecode compiler, a native C virtual ma
 ---
 
 {: .new }
-v0.2.2 adds real iteration (`range`, `enumerate`, `zip`, iterators, `for/while ... else`), more operators and syntax (bitwise, chained comparisons, unpacking, `del`, comprehension `if`, f-strings), and many built-ins (`sorted`, `sum`, `min`, `max`, `abs`, `round`, `pow`, `ord`, `chr`, `format`, and more). `print` now matches CPython's `repr`/`str`. See the [changelog](CHANGELOG.md).
+v0.3.0 completes the method surfaces: every public method of `str`, `bytes`, `list`, `dict`, `set`, and `frozenset` — 136 in all — plus `str.format`, set and dict operators, and Unicode tables generated from CPython 3.14. Modules compiled with v0.2.2 keep working without recompiling. See the [changelog](CHANGELOG.md).
 
 ## What is cVM?
 
@@ -84,18 +84,18 @@ The program produces output through `print`; there is no implicit trailing outpu
 
 | | |
 |:--|:--|
-| Current release | **v0.2.2** |
+| Current release | **v0.3.0** |
 | Platform | Windows, built with MSVC |
 | CVM2 format version | 3 |
-| Test suite | 180 tests passing |
+| Test suite | 259 tests passing |
 
 | Test suite | Tests |
 |:-----------|------:|
-| Examples | 100 |
+| Examples | 112 |
 | Compiler errors | 18 |
 | Container validation | 14 |
 | Arithmetic errors | 7 |
-| Runtime errors | 31 |
+| Runtime errors | 98 |
 | Runtime stress | 5 |
 | Stub | 5 |
 

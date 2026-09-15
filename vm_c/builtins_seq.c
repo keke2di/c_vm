@@ -223,28 +223,17 @@ static int merge_sort(SortItem *items, SortItem *tmp, size_t lo, size_t hi, int 
     return merge(items, tmp, lo, mid, hi, ok);
 }
 
-Value *builtin_sorted(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
-    uint32_t npos = nargs - kw_count(kwnames);
-    if (npos != 1) return vm_fail(vm, VM_ERR_TYPE);
-
-    Value *slots[2];
-    if (bind_keywords(vm, args + npos, kwnames, SORTED_KEYWORDS, 2, slots) != 0) return NULL;
-    Value *key = slots[0];
-    int reverse = slots[1] ? value_truthy(slots[1]) : 0;
-
-    Value *list = value_list_from_iterable(vm, args[0]);
-    if (!list) return NULL;
-
+int value_list_sort(VM *vm, Value *list, Value *key, int reverse) {
     size_t n = list->data.list.len;
-    if (n <= 1) return list;
+    if (n <= 1) return 0;
 
     SortItem *items = malloc(n * sizeof(SortItem));
     SortItem *tmp = malloc(n * sizeof(SortItem));
     if (!items || !tmp) {
         free(items);
         free(tmp);
-        value_release(list);
-        return vm_fail(vm, VM_ERR_OOM);
+        vm->last_error = VM_ERR_OOM;
+        return -1;
     }
 
     int failed = 0;
@@ -266,8 +255,7 @@ Value *builtin_sorted(VM *vm, Value **args, uint32_t nargs, const Value *kwnames
     if (!failed) {
         int ok = 1;
         if (merge_sort(items, tmp, 0, n, &ok) != 0 || !ok) {
-            if (ok) vm->last_error = VM_ERR_OOM;
-            else vm->last_error = VM_ERR_TYPE;
+            vm->last_error = ok ? VM_ERR_OOM : VM_ERR_TYPE;
             for (size_t i = 0; i < n; i++) {
                 value_release(items[i].key);
                 value_release(items[i].val);
@@ -280,20 +268,14 @@ Value *builtin_sorted(VM *vm, Value **args, uint32_t nargs, const Value *kwnames
 
     if (failed) {
         free(items);
-        value_release(list);
-        return NULL;
+        return -1;
     }
 
-    Value *result = value_new_list();
-    if (result) {
-        for (size_t i = 0; i < n; i++) {
-            size_t idx = reverse ? n - 1 - i : i;
-            if (value_list_append(result, items[idx].val) != 0) {
-                value_release(result);
-                result = NULL;
-                break;
-            }
-        }
+    for (size_t i = 0; i < n; i++) {
+        size_t idx = reverse ? n - 1 - i : i;
+        Value *old = list->data.list.items[idx];
+        list->data.list.items[idx] = value_retain(items[i].val);
+        value_release(old);
     }
 
     for (size_t i = 0; i < n; i++) {
@@ -301,9 +283,27 @@ Value *builtin_sorted(VM *vm, Value **args, uint32_t nargs, const Value *kwnames
         value_release(items[i].val);
     }
     free(items);
-    value_release(list);
+    return 0;
+}
 
-    return result ? result : vm_fail(vm, VM_ERR_OOM);
+Value *builtin_sorted(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    uint32_t npos = nargs - kw_count(kwnames);
+    if (npos != 1) return vm_fail(vm, VM_ERR_TYPE);
+
+    Value *slots[2];
+    if (bind_keywords(vm, args + npos, kwnames, SORTED_KEYWORDS, 2, slots) != 0) return NULL;
+    Value *key = slots[0];
+    int reverse = slots[1] ? value_truthy(slots[1]) : 0;
+
+    Value *list = value_list_from_iterable(vm, args[0]);
+    if (!list) return NULL;
+
+    if (value_list_sort(vm, list, key, reverse) != 0) {
+        value_release(list);
+        return NULL;
+    }
+
+    return list;
 }
 
 static Value *any_all(VM *vm, Value **args, uint32_t nargs, const Value *kwnames, int want_all) {

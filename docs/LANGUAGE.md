@@ -237,13 +237,23 @@ f-strings support the full format-spec mini-language (fill, alignment, sign, `#`
 | `enumerate`, `zip`, `map`, `filter`, `reversed`, `iter`, `next` | Iteration |
 | `isinstance`, `callable`, `id`, `ord`, `chr`, `bin`, `oct`, `hex` | Inspection and conversion |
 
-| Method | Purpose |
-|:-------|:--------|
-| `list.append(value)` | Append to a list |
-| `dict.get(key[, default])` | Look up a key |
-| `dict.keys()`, `dict.values()`, `dict.items()` | Live views |
-| `set.add(value)` | Add to a set |
-| `str.encode(...)`, `bytes.decode(...)` | Encode and decode text |
+Every public method of `str`, `bytes`, `list`, `dict`, `set`, and `frozenset` is available:
+
+| Type | Methods |
+|:-----|:--------|
+| `str`, `bytes` | Searching (`find`, `index`, `count`, `startswith`, `endswith`), editing (`replace`, `strip`, `removeprefix`, `translate`), splitting and joining (`split`, `splitlines`, `join`, `partition`), case (`upper`, `lower`, `title`, `casefold`), padding (`center`, `ljust`, `zfill`), the `is*` predicates, and `format`/`format_map` |
+| `list` | `append`, `extend`, `insert`, `pop`, `remove`, `clear`, `index`, `count`, `reverse`, `copy`, `sort` |
+| `dict` | `get`, `keys`, `values`, `items`, `pop`, `popitem`, `setdefault`, `update`, `clear`, `copy`, `fromkeys` |
+| `set`, `frozenset` | `add`, `remove`, `discard`, `pop`, `update`, `union`, `intersection`, `difference`, `symmetric_difference`, `issubset`, `issuperset`, `isdisjoint`, and more |
+
+```python
+print("a,b,c".split(","))
+print("-".join(["x", "y"]))
+print("Hello {}, you are {age}".format("Ada", age=36))
+print({1, 2} | {2, 3}, {1, 2} & {2, 3})
+```
+
+The full matrix is in [Compatibility](COMPATIBILITY.md#methods).
 
 `len()` compiles to a single instruction unless `len` is used as a value or the name `len` is bound in the program.
 

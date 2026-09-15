@@ -26,6 +26,9 @@ How a cVM release is prepared and published.
 | Compatible fixes and features | Patch | `0.2.0` to `0.2.1` |
 | Bytecode, container, or runtime semantics change | Minor | `0.2.0` to `0.3.0` |
 
+{: .note }
+**One recorded exception.** `v0.2.2` shipped bytecode and runtime changes under a patch label, which this table would call a minor bump. That was a deliberate choice to publish a mid-development checkpoint, not a change to the rule above. The rule stands as written for every release after it.
+
 ## Checklist
 
 ### Source tree
@@ -73,10 +76,10 @@ Review the complete working tree before committing.
 git add .
 git status --short
 git diff --cached --check
-git commit -m "Release cVM v0.2.2"
-git tag -a v0.2.2 -m "cVM v0.2.2"
+git commit -m "Release cVM v0.3.0"
+git tag -a v0.3.0 -m "cVM v0.3.0"
 git push origin main
-git push origin v0.2.2
+git push origin v0.3.0
 ```
 
 Create the GitHub release from the tag, using the changelog entry as release notes.

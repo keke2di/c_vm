@@ -267,6 +267,16 @@ void op_compare(VM *vm, uint8_t op) {
         } else {
             vm->last_error = VM_ERR_TYPE;
         }
+    } else if (is_setlike(a) && is_setlike(b)) {
+        uint32_t la = a->data.set.len;
+        uint32_t lb = b->data.set.len;
+        switch (op) {
+            case OP_COMPARE_LE: result = setlike_subset(a, b); break;
+            case OP_COMPARE_LT: result = la < lb && setlike_subset(a, b); break;
+            case OP_COMPARE_GE: result = setlike_subset(b, a); break;
+            case OP_COMPARE_GT: result = la > lb && setlike_subset(b, a); break;
+            default: break;
+        }
     } else {
         vm->last_error = VM_ERR_TYPE;
     }

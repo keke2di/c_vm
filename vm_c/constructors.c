@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include "unicode.h"
 #include "vm_internal.h"
 
 static int int_like(const Value *v) {
@@ -12,6 +13,26 @@ static int digit_value(char c) {
     if (c >= 'a' && c <= 'z') return c - 'a' + 10;
     if (c >= 'A' && c <= 'Z') return c - 'A' + 10;
     return 36;
+}
+
+static int digit_at(const char *s, size_t i, size_t end, int unicode_digits, size_t *width) {
+    if (s[i] >= '0' && s[i] <= '9') {
+        *width = 1;
+        return s[i] - '0';
+    }
+
+    if (unicode_digits && (unsigned char)s[i] >= 0x80) {
+        size_t next = i;
+        uint32_t cp = utf8_decode(s, end, &next);
+        int d = uni_decimal_value(cp);
+
+        if (d >= 0) {
+            *width = next - i;
+            return d;
+        }
+    }
+
+    return -1;
 }
 
 static int parse_int_text(const char *s, size_t len, int space_mode, int base, int64_t *out) {
@@ -51,17 +72,31 @@ static int parse_int_text(const char *s, size_t len, int space_mode, int base, i
     int nonzero = 0;
     int last_underscore = 0;
 
-    for (; i < end; i++) {
+    int unicode_digits = space_mode != SPACE_ASCII;
+
+    while (i < end) {
         char c = s[i];
 
         if (c == '_') {
             if (!underscore_ok) return VM_ERR_VALUE;
             underscore_ok = 0;
             last_underscore = 1;
+            i++;
             continue;
         }
 
-        int d = digit_value(c);
+        int d;
+
+        if (unicode_digits && (unsigned char)c >= 0x80) {
+            size_t width;
+            d = digit_at(s, i, end, unicode_digits, &width);
+            if (d < 0) return VM_ERR_VALUE;
+            i += width;
+        } else {
+            d = digit_value(c);
+            i++;
+        }
+
         if (d >= base) return VM_ERR_VALUE;
 
         if (digits == 0 && d == 0) leading_zero = 1;
@@ -105,19 +140,29 @@ static int ascii_equal_nocase(const char *s, size_t len, const char *word) {
     return 1;
 }
 
-static size_t scan_digits(const char *s, size_t *pos, size_t end, char *buf, size_t *o) {
+static size_t scan_digits(const char *s, size_t *pos, size_t end, char *buf, size_t *o,
+                          int unicode_digits) {
     size_t i = *pos;
     size_t count = 0;
 
     while (i < end) {
-        if (s[i] >= '0' && s[i] <= '9') {
-            buf[(*o)++] = s[i++];
+        size_t width;
+        int d = digit_at(s, i, end, unicode_digits, &width);
+
+        if (d >= 0) {
+            buf[(*o)++] = (char)('0' + d);
+            i += width;
             count++;
-        } else if (s[i] == '_' && count > 0 && i + 1 < end && s[i + 1] >= '0' && s[i + 1] <= '9') {
-            i++;
-        } else {
-            break;
+            continue;
         }
+
+        if (s[i] == '_' && count > 0 && i + 1 < end &&
+            digit_at(s, i + 1, end, unicode_digits, &width) >= 0) {
+            i++;
+            continue;
+        }
+
+        break;
     }
 
     *pos = i;
@@ -154,13 +199,14 @@ static int parse_float_text(const char *s, size_t len, int space_mode, double *o
     size_t o = 0;
     if (negative) buf[o++] = '-';
 
-    size_t whole = scan_digits(s, &i, end, buf, &o);
+    int unicode_digits = space_mode != SPACE_ASCII;
+    size_t whole = scan_digits(s, &i, end, buf, &o, unicode_digits);
     size_t frac = 0;
 
     if (i < end && s[i] == '.') {
         buf[o++] = '.';
         i++;
-        frac = scan_digits(s, &i, end, buf, &o);
+        frac = scan_digits(s, &i, end, buf, &o, unicode_digits);
     }
 
     int ok = whole + frac > 0;
@@ -171,7 +217,7 @@ static int parse_float_text(const char *s, size_t len, int space_mode, double *o
         if (i < end && (s[i] == '+' || s[i] == '-')) {
             buf[o++] = s[i++];
         }
-        ok = scan_digits(s, &i, end, buf, &o) > 0;
+        ok = scan_digits(s, &i, end, buf, &o, unicode_digits) > 0;
     }
 
     ok = ok && i == end;

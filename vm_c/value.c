@@ -540,6 +540,55 @@ int value_set_contains(const Value *set, Value *item) {
     return 0;
 }
 
+int value_set_discard(Value *set, const Value *item) {
+    if (!set || (set->tag != TAG_SET && set->tag != TAG_FROZENSET)) return 0;
+
+    for (uint32_t i = 0; i < set->data.set.len; i++) {
+        if (value_equal(set->data.set.items[i], item)) {
+            Value *removed = set->data.set.items[i];
+            memmove(&set->data.set.items[i], &set->data.set.items[i + 1],
+                    (set->data.set.len - i - 1) * sizeof(Value *));
+            set->data.set.len--;
+            value_release(removed);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+int value_list_insert(Value *list, int64_t index, Value *item) {
+    if (!list || list->tag != TAG_LIST) return -1;
+
+    int64_t len = list->data.list.len;
+    if (index < 0) {
+        index += len;
+        if (index < 0) index = 0;
+    } else if (index > len) {
+        index = len;
+    }
+
+    if (value_list_append(list, item) != 0) return -1;
+
+    Value *inserted = list->data.list.items[len];
+    for (int64_t i = len; i > index; i--) {
+        list->data.list.items[i] = list->data.list.items[i - 1];
+    }
+    list->data.list.items[index] = inserted;
+    return 0;
+}
+
+Value *value_list_remove_at(Value *list, int64_t index) {
+    if (!list || list->tag != TAG_LIST) return NULL;
+    if (index < 0 || index >= list->data.list.len) return NULL;
+
+    Value *item = list->data.list.items[index];
+    memmove(&list->data.list.items[index], &list->data.list.items[index + 1],
+            (list->data.list.len - (size_t)index - 1) * sizeof(Value *));
+    list->data.list.len--;
+    return item;
+}
+
 int value_truthy(const Value *v) {
     if (!v) return 0;
 
