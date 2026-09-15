@@ -33,7 +33,7 @@ Build from an MSVC Developer Command Prompt or Developer PowerShell. From a regu
 | Path | Contents |
 |:-----|:---------|
 | `compiler/` | Python compiler: AST to bytecode, constant pool, symbol tables, emitter, opcode table, CVM2 writer, command line |
-| `vm_c/` | Native VM: loader, interpreter, value model, executable stub, build script |
+| `vm_c/` | Native VM, split per area: loader, interpreter, value model, operators, iteration, built-ins, constructors, methods, codecs, executable stub, build script |
 | `packer/` | Appends a compiled module to the VM stub |
 | `examples/` | Example programs, also used as regression tests |
 | `tests/` | Test suites |
@@ -91,11 +91,11 @@ python tests/run_all.py
 
 | Suite | Covers | Tests |
 |:------|:-------|------:|
-| `tests/run_examples.py` | Compiles, packs, and runs every program in `examples/`, comparing output against CPython | 69 |
-| `tests/test_compiler_errors.py` | Unsupported or invalid source is rejected with the expected error | 22 |
+| `tests/run_examples.py` | Compiles, packs, and runs every program in `examples/`, comparing output against CPython | 100 |
+| `tests/test_compiler_errors.py` | Unsupported or invalid source is rejected with the expected error | 18 |
 | `tests/test_container_errors.py` | Malformed CVM2 containers are rejected | 14 |
-| `tests/test_arithmetic_errors.py` | Integer overflow is reported | 8 |
-| `tests/test_runtime_errors.py` | Call and argument binding errors are reported | 12 |
+| `tests/test_arithmetic_errors.py` | Integer overflow is reported | 7 |
+| `tests/test_runtime_errors.py` | Call, value, and runtime errors are reported | 31 |
 | `tests/runtime_stress.py` | Deep recursion and large collections | 5 |
 | `tests/test_stub.py` | The packed executable imports only KERNEL32, uses no temp file, and matches CPython | 5 |
 

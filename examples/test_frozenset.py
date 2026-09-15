@@ -1,0 +1,10 @@
+fs = frozenset([1, 2, 3, 3])
+print(fs, fs == {1, 2, 3}, {1, 2, 3} == fs, frozenset() == set(), len(fs), 2 in fs, 5 in fs)
+print(frozenset(), frozenset("a"), str(frozenset([7])), type(fs), frozenset, type(frozenset()) is frozenset)
+print(frozenset(fs) is fs, set(fs) == fs, type(set(fs)), fs != {1, 2})
+key = frozenset({1, 2})
+table = {key: "pair", frozenset(): "empty"}
+print(table[frozenset([2, 1])], table[frozenset()], frozenset({1}) in {frozenset({1})}, {1} in {frozenset({1})})
+print({(1, frozenset({2})): 1}, [frozenset({frozenset({1})})], {frozenset()})
+print(bool(frozenset()), bool(fs), list(frozenset([4, 5])), len(frozenset("aab")))
+print({1, 2} == frozenset([1, 2]), frozenset([1]) == frozenset([1.0]), frozenset([(1, 2)]) == {(1, 2)})

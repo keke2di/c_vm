@@ -73,10 +73,10 @@ Review the complete working tree before committing.
 git add .
 git status --short
 git diff --cached --check
-git commit -m "Release cVM v0.2.1"
-git tag -a v0.2.1 -m "cVM v0.2.1"
+git commit -m "Release cVM v0.2.2"
+git tag -a v0.2.2 -m "cVM v0.2.2"
 git push origin main
-git push origin v0.2.1
+git push origin v0.2.2
 ```
 
 Create the GitHub release from the tag, using the changelog entry as release notes.

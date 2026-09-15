@@ -220,6 +220,290 @@ static int vm_prepare(VM *vm) {
     return 1;
 }
 
+int vm_step(VM *vm) {
+    uint8_t op = *vm->ip++;
+    uint32_t operand = 0;
+
+    switch (op) {
+        case OP_NOP:
+            break;
+
+        case OP_LOAD_CONST:
+            if (!read_operand(vm, &operand)) break;
+            if (operand >= vm->num_constants) {
+                vm->last_error = VM_ERR_BOUNDS;
+                break;
+            }
+            vm_push(vm, vm->constants[operand]);
+            break;
+
+        case OP_LOAD_FAST:
+            if (read_operand(vm, &operand)) op_load_fast(vm, operand);
+            break;
+
+        case OP_STORE_FAST:
+            if (read_operand(vm, &operand)) op_store_fast(vm, operand);
+            break;
+
+        case OP_LOAD_GLOBAL:
+            if (read_operand(vm, &operand)) op_load_global(vm, operand);
+            break;
+
+        case OP_STORE_GLOBAL:
+            if (read_operand(vm, &operand)) op_store_global(vm, operand);
+            break;
+
+        case OP_POP_TOP: {
+            Value *v = vm_pop(vm);
+            if (v) value_release(v);
+            break;
+        }
+
+        case OP_DUP_TOP:
+            if (vm->stack_top == 0) {
+                vm->last_error = VM_ERR_STACK;
+                break;
+            }
+            vm_push(vm, vm->stack[vm->stack_top - 1]);
+            break;
+
+        case OP_DUP_TOP_TWO: {
+            if (vm->stack_top < 2) {
+                vm->last_error = VM_ERR_STACK;
+                break;
+            }
+            Value *second = vm->stack[vm->stack_top - 2];
+            Value *first = vm->stack[vm->stack_top - 1];
+            vm_push(vm, second);
+            vm_push(vm, first);
+            break;
+        }
+
+        case OP_DELETE_FAST:
+            if (read_operand(vm, &operand)) {
+                if (!vm->current_frame || operand >= vm->current_frame->locals_cap ||
+                    !vm->current_frame->locals[operand]) {
+                    vm->last_error = VM_ERR_STACK;
+                } else {
+                    value_release(vm->current_frame->locals[operand]);
+                    vm->current_frame->locals[operand] = NULL;
+                }
+            }
+            break;
+
+        case OP_DELETE_GLOBAL:
+            if (read_operand(vm, &operand)) {
+                if (operand >= vm->num_names || !vm->globals[operand]) {
+                    vm->last_error = VM_ERR_FUNC_NOT_FOUND;
+                } else {
+                    value_release(vm->globals[operand]);
+                    vm->globals[operand] = NULL;
+                }
+            }
+            break;
+
+        case OP_DELETE_SUBSCR:
+            op_delete_index(vm);
+            break;
+
+        case OP_ROT_TWO: {
+            if (vm->stack_top < 2) {
+                vm->last_error = VM_ERR_STACK;
+                break;
+            }
+            Value *tmp = vm->stack[vm->stack_top - 1];
+            vm->stack[vm->stack_top - 1] = vm->stack[vm->stack_top - 2];
+            vm->stack[vm->stack_top - 2] = tmp;
+            break;
+        }
+
+        case OP_ROT_THREE: {
+            if (vm->stack_top < 3) {
+                vm->last_error = VM_ERR_STACK;
+                break;
+            }
+            Value *top = vm->stack[vm->stack_top - 1];
+            vm->stack[vm->stack_top - 1] = vm->stack[vm->stack_top - 2];
+            vm->stack[vm->stack_top - 2] = vm->stack[vm->stack_top - 3];
+            vm->stack[vm->stack_top - 3] = top;
+            break;
+        }
+
+        case OP_BINARY_ADD:
+        case OP_BINARY_SUB:
+        case OP_BINARY_MUL:
+        case OP_BINARY_DIV:
+        case OP_BINARY_MOD:
+        case OP_BINARY_POW:
+        case OP_BINARY_FLOORDIV:
+        case OP_BINARY_AND:
+        case OP_BINARY_OR:
+        case OP_BINARY_XOR:
+        case OP_BINARY_LSHIFT:
+        case OP_BINARY_RSHIFT:
+            op_binary(vm, op);
+            break;
+
+        case OP_UNARY_NEG:
+        case OP_UNARY_NOT:
+        case OP_UNARY_POS:
+        case OP_UNARY_INVERT:
+            op_unary(vm, op);
+            break;
+
+        case OP_COMPARE_EQ:
+        case OP_COMPARE_NE:
+        case OP_COMPARE_LT:
+        case OP_COMPARE_LE:
+        case OP_COMPARE_GT:
+        case OP_COMPARE_GE:
+            op_compare(vm, op);
+            break;
+
+        case OP_CONTAINS:
+            op_contains(vm);
+            break;
+
+        case OP_COMPARE_IS:
+            op_is(vm, 0);
+            break;
+
+        case OP_COMPARE_IS_NOT:
+            op_is(vm, 1);
+            break;
+
+        case OP_JUMP:
+            if (read_operand(vm, &operand)) vm_jump(vm, operand);
+            break;
+
+        case OP_JUMP_IF_FALSE:
+        case OP_JUMP_IF_TRUE: {
+            if (!read_operand(vm, &operand)) break;
+            Value *cond = vm_pop(vm);
+            if (!cond) break;
+            int truth = value_truthy(cond);
+            value_release(cond);
+            if (truth == (op == OP_JUMP_IF_TRUE)) {
+                vm_jump(vm, operand);
+            }
+            break;
+        }
+
+        case OP_RETURN:
+            return op_return(vm);
+
+        case OP_CALL:
+            if (read_operand(vm, &operand)) vm_call_value(vm, operand, NULL);
+            break;
+
+        case OP_CALL_KW:
+            if (read_operand(vm, &operand)) op_call_kw(vm, operand);
+            break;
+
+        case OP_CALL_METHOD:
+            if (read_operand(vm, &operand)) vm_call_method(vm, operand, 0);
+            break;
+
+        case OP_CALL_METHOD_KW:
+            if (read_operand(vm, &operand)) vm_call_method(vm, operand, 1);
+            break;
+
+        case OP_BUILD_LIST:
+            if (read_operand(vm, &operand)) op_build_list(vm, operand);
+            break;
+
+        case OP_BUILD_TUPLE:
+            if (read_operand(vm, &operand)) op_build_tuple(vm, operand);
+            break;
+
+        case OP_BUILD_MAP:
+            if (read_operand(vm, &operand)) op_build_map(vm, operand);
+            break;
+
+        case OP_BUILD_SET:
+            if (read_operand(vm, &operand)) op_build_set(vm, operand);
+            break;
+
+        case OP_LIST_APPEND:
+            op_list_append(vm);
+            break;
+
+        case OP_SET_ADD:
+            op_set_add(vm);
+            break;
+
+        case OP_MAP_ADD:
+            op_map_add(vm);
+            break;
+
+        case OP_GET_INDEX:
+            op_get_index(vm);
+            break;
+
+        case OP_SET_INDEX:
+            op_set_index(vm);
+            break;
+
+        case OP_GET_ITER_ITEM:
+            op_get_iter_item(vm);
+            break;
+
+        case OP_GET_ITER:
+            op_get_iter(vm);
+            break;
+
+        case OP_UNPACK_SEQUENCE:
+            if (read_operand(vm, &operand)) op_unpack_sequence(vm, operand);
+            break;
+
+        case OP_UNPACK_EX:
+            if (read_operand(vm, &operand)) {
+                op_unpack_ex(vm, operand & 0xFFFF, operand >> 16);
+            }
+            break;
+
+        case OP_FOR_ITER: {
+            if (!read_operand(vm, &operand)) break;
+            Value *iter = vm_pop(vm);
+            if (!iter) {
+                vm->last_error = VM_ERR_STACK;
+                break;
+            }
+            Value *next = iterator_next(vm, iter);
+            value_release(iter);
+            if (vm->last_error != VM_ERR_OK) break;
+            if (next) {
+                vm_push_owned(vm, next);
+            } else {
+                vm_jump(vm, operand);
+            }
+            break;
+        }
+
+        case OP_GET_SLICE:
+            op_get_slice(vm);
+            break;
+
+        case OP_LEN:
+            op_len(vm);
+            break;
+
+        case OP_FORMAT_VALUE:
+            if (read_operand(vm, &operand)) op_format_value(vm, operand);
+            break;
+
+        case OP_BUILD_STRING:
+            if (read_operand(vm, &operand)) op_build_string(vm, operand);
+            break;
+
+        default:
+            vm->last_error = VM_ERR_INVALID_OP;
+            break;
+    }
+
+    return 0;
+}
+
 int vm_run(VM *vm) {
     if (!vm || vm->entry_func_index >= vm->num_functions) {
         if (vm) vm->last_error = VM_ERR_FUNC_NOT_FOUND;
@@ -235,177 +519,8 @@ int vm_run(VM *vm) {
             vm->last_error = VM_ERR_BOUNDS;
             break;
         }
-
-        uint8_t op = *vm->ip++;
-        uint32_t operand = 0;
-
-        switch (op) {
-            case OP_NOP:
-                break;
-
-            case OP_LOAD_CONST:
-                if (!read_operand(vm, &operand)) break;
-                if (operand >= vm->num_constants) {
-                    vm->last_error = VM_ERR_BOUNDS;
-                    break;
-                }
-                vm_push(vm, vm->constants[operand]);
-                break;
-
-            case OP_LOAD_FAST:
-                if (read_operand(vm, &operand)) op_load_fast(vm, operand);
-                break;
-
-            case OP_STORE_FAST:
-                if (read_operand(vm, &operand)) op_store_fast(vm, operand);
-                break;
-
-            case OP_LOAD_GLOBAL:
-                if (read_operand(vm, &operand)) op_load_global(vm, operand);
-                break;
-
-            case OP_STORE_GLOBAL:
-                if (read_operand(vm, &operand)) op_store_global(vm, operand);
-                break;
-
-            case OP_POP_TOP: {
-                Value *v = vm_pop(vm);
-                if (v) value_release(v);
-                break;
-            }
-
-            case OP_DUP_TOP:
-                if (vm->stack_top == 0) {
-                    vm->last_error = VM_ERR_STACK;
-                    break;
-                }
-                vm_push(vm, vm->stack[vm->stack_top - 1]);
-                break;
-
-            case OP_BINARY_ADD:
-            case OP_BINARY_SUB:
-            case OP_BINARY_MUL:
-            case OP_BINARY_DIV:
-            case OP_BINARY_MOD:
-            case OP_BINARY_POW:
-            case OP_BINARY_FLOORDIV:
-                op_binary(vm, op);
-                break;
-
-            case OP_UNARY_NEG:
-            case OP_UNARY_NOT:
-            case OP_UNARY_POS:
-            case OP_UNARY_INVERT:
-                op_unary(vm, op);
-                break;
-
-            case OP_COMPARE_EQ:
-            case OP_COMPARE_NE:
-            case OP_COMPARE_LT:
-            case OP_COMPARE_LE:
-            case OP_COMPARE_GT:
-            case OP_COMPARE_GE:
-                op_compare(vm, op);
-                break;
-
-            case OP_CONTAINS:
-                op_contains(vm);
-                break;
-
-            case OP_COMPARE_IS:
-                op_is(vm, 0);
-                break;
-
-            case OP_COMPARE_IS_NOT:
-                op_is(vm, 1);
-                break;
-
-            case OP_JUMP:
-                if (read_operand(vm, &operand)) vm_jump(vm, operand);
-                break;
-
-            case OP_JUMP_IF_FALSE:
-            case OP_JUMP_IF_TRUE: {
-                if (!read_operand(vm, &operand)) break;
-                Value *cond = vm_pop(vm);
-                if (!cond) break;
-                int truth = value_truthy(cond);
-                value_release(cond);
-                if (truth == (op == OP_JUMP_IF_TRUE)) {
-                    vm_jump(vm, operand);
-                }
-                break;
-            }
-
-            case OP_RETURN:
-                if (op_return(vm)) {
-                    return vm->last_error;
-                }
-                break;
-
-            case OP_CALL:
-                if (read_operand(vm, &operand)) vm_call_value(vm, operand, NULL);
-                break;
-
-            case OP_CALL_KW:
-                if (read_operand(vm, &operand)) op_call_kw(vm, operand);
-                break;
-
-            case OP_CALL_METHOD:
-                if (read_operand(vm, &operand)) vm_call_method(vm, operand);
-                break;
-
-            case OP_BUILD_LIST:
-                if (read_operand(vm, &operand)) op_build_list(vm, operand);
-                break;
-
-            case OP_BUILD_TUPLE:
-                if (read_operand(vm, &operand)) op_build_tuple(vm, operand);
-                break;
-
-            case OP_BUILD_MAP:
-                if (read_operand(vm, &operand)) op_build_map(vm, operand);
-                break;
-
-            case OP_BUILD_SET:
-                if (read_operand(vm, &operand)) op_build_set(vm, operand);
-                break;
-
-            case OP_LIST_APPEND:
-                op_list_append(vm);
-                break;
-
-            case OP_SET_ADD:
-                op_set_add(vm);
-                break;
-
-            case OP_MAP_ADD:
-                op_map_add(vm);
-                break;
-
-            case OP_GET_INDEX:
-                op_get_index(vm);
-                break;
-
-            case OP_SET_INDEX:
-                op_set_index(vm);
-                break;
-
-            case OP_GET_ITER_ITEM:
-                op_get_iter_item(vm);
-                break;
-
-            case OP_GET_SLICE:
-                op_get_slice(vm);
-                break;
-
-            case OP_LEN:
-                op_len(vm);
-                break;
-
-            default:
-                vm->last_error = VM_ERR_INVALID_OP;
-                break;
+        if (vm_step(vm)) {
+            break;
         }
     }
 
@@ -481,6 +596,13 @@ const char *vm_error_string(VM *vm) {
         case VM_ERR_FUNC_NOT_FOUND: return "Function not found";
         case VM_ERR_INVALID_OP: return "Invalid opcode";
         case VM_ERR_OVERFLOW: return "Integer overflow";
+        case VM_ERR_VALUE: return "Value error";
+        case VM_ERR_STOP: return "StopIteration";
+        case VM_ERR_KEY: return "Key error";
+        case VM_ERR_ATTR: return "Attribute error";
+        case VM_ERR_RUNTIME: return "Runtime error";
+        case VM_ERR_LOOKUP: return "Lookup error";
+        case VM_ERR_UNICODE: return "Unicode error";
         default: return "Unknown error";
     }
 }

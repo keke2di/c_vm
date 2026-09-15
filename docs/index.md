@@ -17,7 +17,7 @@ A small Python-like language runtime: a bytecode compiler, a native C virtual ma
 ---
 
 {: .new }
-The packed executable now loads from memory, needs no Visual C++ runtime, and imports only `KERNEL32.dll`. `bool`, `None`, `is`, and type objects are supported. See the [changelog](CHANGELOG.md).
+v0.2.2 adds real iteration (`range`, `enumerate`, `zip`, iterators, `for/while ... else`), more operators and syntax (bitwise, chained comparisons, unpacking, `del`, comprehension `if`, f-strings), and many built-ins (`sorted`, `sum`, `min`, `max`, `abs`, `round`, `pow`, `ord`, `chr`, `format`, and more). `print` now matches CPython's `repr`/`str`. See the [changelog](CHANGELOG.md).
 
 ## What is cVM?
 
@@ -42,15 +42,14 @@ The compiler parses source with Python's own `ast` module, emits bytecode, and w
 ## A quick example
 
 ```python
-def greet(name, punctuation="!"):
-    return "Hello " + name + punctuation
+def describe(name, scores):
+    total = sum(scores)
+    top = max(scores)
+    return f"{name}: {len(scores)} scores, total {total}, best {top}"
 
-def apply(fn, value):
-    return fn(value)
-
-print(greet("cVM"))
-print(greet(punctuation="?", name="Ada"))
-print(apply(str, 42) + " is a string")
+people = {"Ada": [88, 91, 79], "Linus": [95, 70]}
+for name, scores in sorted(people.items()):
+    print(describe(name, scores))
 ```
 
 Compile, pack, and run it:
@@ -62,9 +61,8 @@ python -m packer.pack vm_c/stub.exe output/example.cvm output/example.exe
 ```
 
 ```text
-Hello cVM!
-Hello Ada?
-42 is a string
+Ada: 3 scores, total 258, best 91
+Linus: 2 scores, total 165, best 95
 ```
 
 The program produces output through `print`; there is no implicit trailing output.
@@ -86,18 +84,18 @@ The program produces output through `print`; there is no implicit trailing outpu
 
 | | |
 |:--|:--|
-| Current release | **v0.2.1** |
+| Current release | **v0.2.2** |
 | Platform | Windows, built with MSVC |
 | CVM2 format version | 3 |
-| Test suite | 135 tests passing |
+| Test suite | 180 tests passing |
 
 | Test suite | Tests |
 |:-----------|------:|
-| Examples | 69 |
-| Compiler errors | 22 |
+| Examples | 100 |
+| Compiler errors | 18 |
 | Container validation | 14 |
-| Arithmetic errors | 8 |
-| Runtime errors | 12 |
+| Arithmetic errors | 7 |
+| Runtime errors | 31 |
 | Runtime stress | 5 |
 | Stub | 5 |
 

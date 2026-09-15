@@ -1,0 +1,12 @@
+print([x * x for x in range(5)])
+print([x for x in range(10) if x % 2 == 0])
+print([x for x in range(20) if x % 2 == 0 if x % 3 == 0])
+print([a + b for a in [1, 2] for b in [10, 20]])
+print([[r, c] for r in range(2) for c in range(2)])
+print({x: x * x for x in range(4)})
+print({x % 3 for x in range(10)})
+print([x for row in [[1, 2], [3, 4]] for x in row])
+pairs = [(1, "a"), (2, "b"), (3, "c")]
+print([n for n, s in pairs if n > 1])
+print([s for n, s in pairs])
+print([n for n in range(30) if n % 3 == 0 if n % 5 == 0])

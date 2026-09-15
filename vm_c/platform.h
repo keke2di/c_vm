@@ -5,5 +5,6 @@
 #include <stdint.h>
 
 uint8_t *platform_read_executable(size_t *out_len);
+void platform_write_stdout(const char *data, size_t len);
 
 #endif

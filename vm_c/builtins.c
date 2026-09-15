@@ -1,236 +1,281 @@
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "platform.h"
 #include "vm_internal.h"
 
 static int int_like(const Value *v) {
     return v->tag == TAG_INT || v->tag == TAG_BOOL;
 }
 
-static void builtin_print(VM *vm, uint32_t nargs) {
-    uint32_t start = vm->stack_top - nargs;
+static int is_callable(const Value *v) {
+    return v->tag == TAG_FUNCTION || v->tag == TAG_TYPE;
+}
 
-    for (uint32_t i = 0; i < nargs; i++) {
-        char *s = value_to_string(vm->stack[start + i]);
-        if (!s) {
-            vm->last_error = VM_ERR_OOM;
-            return;
-        }
-        if (i > 0) printf(" ");
-        printf("%s", s);
+static const char *const PRINT_KEYWORDS[] = { "sep", "end", "file", "flush" };
+static const char *const ENUMERATE_PARAMS[] = { "iterable", "start" };
+static const char *const STRICT_KEYWORD[] = { "strict" };
+
+static int text_argument(const Value *v, const char *fallback, const char **text, size_t *len) {
+    if (!v || v->tag == TAG_NONE) {
+        *text = fallback;
+        *len = strlen(fallback);
+        return 1;
+    }
+    if (v->tag != TAG_STRING) return 0;
+    *text = v->data.str.data;
+    *len = v->data.str.len;
+    return 1;
+}
+
+static Value *builtin_print(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    uint32_t npos = nargs - kw_count(kwnames);
+    Value *kw[4];
+    if (bind_keywords(vm, args + npos, kwnames, PRINT_KEYWORDS, 4, kw) != 0) return NULL;
+
+    const char *sep;
+    size_t sep_len;
+    const char *end;
+    size_t end_len;
+
+    if (!text_argument(kw[0], " ", &sep, &sep_len) || !text_argument(kw[1], "\n", &end, &end_len)) {
+        return vm_fail(vm, VM_ERR_TYPE);
+    }
+    if (kw[2] && kw[2]->tag != TAG_NONE) {
+        return vm_fail(vm, VM_ERR_ATTR);
+    }
+
+    for (uint32_t i = 0; i < npos; i++) {
+        size_t text_len = 0;
+        char *s = value_to_string_sized(args[i], &text_len);
+        if (!s) return vm_fail(vm, VM_ERR_OOM);
+        if (i > 0) platform_write_stdout(sep, sep_len);
+        platform_write_stdout(s, text_len);
         free(s);
     }
-    printf("\n");
 
-    while (vm->stack_top > start) {
-        Value *arg = vm_pop(vm);
-        if (arg) value_release(arg);
-    }
-
-    vm_push_owned(vm, value_new_none());
+    platform_write_stdout(end, end_len);
+    return value_new_none();
 }
 
-void builtin_int(VM *vm, uint32_t nargs) {
-    if (nargs == 0) {
-        vm_push_owned(vm, value_new_int(0));
-        return;
-    }
-    if (nargs != 1) {
-        vm->last_error = VM_ERR_TYPE;
-        return;
-    }
+static Value *builtin_len(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    if (check_positional(vm, nargs, kwnames, 1, 1) != 0) return NULL;
 
-    Value *arg = vm_pop(vm);
-    if (!arg) return;
-
-    int64_t result = 0;
-    if (int_like(arg)) {
-        result = arg->data.int_val;
-    } else if (arg->tag == TAG_STRING) {
-        char *end;
-        long long parsed = strtoll(arg->data.str.data, &end, 10);
-        if (*end == '\0') {
-            result = parsed;
-        } else {
-            vm->last_error = VM_ERR_TYPE;
-        }
-    } else if (arg->tag == TAG_FLOAT) {
-        result = (int64_t)arg->data.float_val;
-    } else {
-        vm->last_error = VM_ERR_TYPE;
-    }
-
-    value_release(arg);
-    if (vm->last_error == VM_ERR_OK) {
-        vm_push_owned(vm, value_new_int(result));
-    }
+    int64_t len = value_length(args[0]);
+    if (len < 0) return vm_fail(vm, VM_ERR_TYPE);
+    return value_new_int(len);
 }
 
-void builtin_str(VM *vm, uint32_t nargs) {
-    if (nargs != 1) {
-        vm->last_error = VM_ERR_TYPE;
-        return;
-    }
+static Value *builtin_repr(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    if (check_positional(vm, nargs, kwnames, 1, 1) != 0) return NULL;
 
-    Value *arg = vm_pop(vm);
-    if (!arg) return;
+    char *s = value_to_repr(args[0]);
+    if (!s) return vm_fail(vm, VM_ERR_OOM);
 
-    char *s = value_to_string(arg);
-    if (!s) {
-        vm->last_error = VM_ERR_OOM;
-        value_release(arg);
-        return;
-    }
-
-    size_t str_len = arg->tag == TAG_STRING ? value_string_len(arg) : strlen(s);
-    value_release(arg);
-
-    Value *str_val = value_new_string_len(s, str_len);
+    Value *result = value_new_string_len(s, strlen(s));
     free(s);
-
-    vm_push_owned(vm, str_val);
+    return result;
 }
 
-void builtin_float(VM *vm, uint32_t nargs) {
-    if (nargs == 0) {
-        vm_push_owned(vm, value_new_float(0.0));
-        return;
-    }
-    if (nargs != 1) {
-        vm->last_error = VM_ERR_TYPE;
-        return;
+static Value *builtin_enumerate(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    Value *slots[2];
+    if (bind_args(vm, args, nargs, kwnames, ENUMERATE_PARAMS, 2, 2, 1, slots) != 0) return NULL;
+
+    int64_t start = 0;
+    if (slots[1]) {
+        if (!int_like(slots[1])) return vm_fail(vm, VM_ERR_TYPE);
+        start = slots[1]->data.int_val;
     }
 
-    Value *arg = vm_pop(vm);
-    if (!arg) return;
+    Value *sub = value_make_iter(vm, slots[0]);
+    if (!sub) return NULL;
 
-    double result = 0.0;
-    if (arg->tag == TAG_FLOAT) {
-        result = arg->data.float_val;
-    } else if (int_like(arg)) {
-        result = (double)arg->data.int_val;
-    } else if (arg->tag == TAG_STRING) {
-        char *end;
-        double parsed = strtod(arg->data.str.data, &end);
-        if (*end == '\0') {
-            result = parsed;
-        } else {
-            vm->last_error = VM_ERR_TYPE;
-        }
-    } else {
-        vm->last_error = VM_ERR_TYPE;
+    Value *iter = value_new_iterator(ITER_ENUMERATE);
+    if (!iter) {
+        value_release(sub);
+        return vm_fail(vm, VM_ERR_OOM);
     }
 
-    value_release(arg);
-    if (vm->last_error == VM_ERR_OK) {
-        vm_push_owned(vm, value_new_float(result));
-    }
+    iter->data.iter->source = sub;
+    iter->data.iter->counter = start;
+    return iter;
 }
 
-void builtin_list(VM *vm, uint32_t nargs) {
-    if (nargs > vm->stack_top) {
-        vm->last_error = VM_ERR_STACK;
-        return;
+static void free_sub_iters(Value **subs, uint32_t count) {
+    for (uint32_t i = 0; i < count; i++) {
+        if (subs[i]) value_release(subs[i]);
     }
+    free(subs);
+}
 
-    Value *list = value_new_list();
-    if (!list) {
+static int make_sub_iters(VM *vm, Value **iterables, uint32_t count, Value ***out) {
+    *out = NULL;
+    if (count == 0) return 0;
+
+    Value **subs = calloc(count, sizeof(Value *));
+    if (!subs) {
         vm->last_error = VM_ERR_OOM;
-        return;
+        return -1;
     }
 
-    uint32_t start = vm->stack_top - nargs;
-
-    for (uint32_t i = 0; i < nargs; i++) {
-        Value *item = vm->stack[start + i];
-
-        if (value_list_append(list, item) != 0) {
-            value_release(list);
-            vm->last_error = VM_ERR_OOM;
-            return;
+    for (uint32_t i = 0; i < count; i++) {
+        subs[i] = value_make_iter(vm, iterables[i]);
+        if (!subs[i]) {
+            free_sub_iters(subs, i);
+            return -1;
         }
-
-        value_release(item);
     }
 
-    vm->stack_top -= nargs;
-    vm_push_owned(vm, list);
+    *out = subs;
+    return 0;
 }
 
-void builtin_bool(VM *vm, uint32_t nargs) {
-    if (nargs == 0) {
-        vm_push_owned(vm, value_bool(0));
-        return;
-    }
-    if (nargs != 1) {
-        vm->last_error = VM_ERR_TYPE;
-        return;
+static Value *builtin_zip(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    uint32_t npos = nargs - kw_count(kwnames);
+    Value *strict;
+    if (bind_keywords(vm, args + npos, kwnames, STRICT_KEYWORD, 1, &strict) != 0) return NULL;
+
+    Value **subs;
+    if (make_sub_iters(vm, args, npos, &subs) != 0) return NULL;
+
+    Value *iter = value_new_iterator(ITER_ZIP);
+    if (!iter) {
+        free_sub_iters(subs, npos);
+        return vm_fail(vm, VM_ERR_OOM);
     }
 
-    Value *arg = vm_pop(vm);
-    if (!arg) return;
-
-    int truth = value_truthy(arg);
-    value_release(arg);
-    vm_push_owned(vm, value_bool(truth));
+    iter->data.iter->subs = subs;
+    iter->data.iter->nsubs = npos;
+    iter->data.iter->strict = strict ? value_truthy(strict) : 0;
+    return iter;
 }
 
-static void builtin_enumerate(VM *vm, uint32_t nargs) {
-    if (nargs != 1) {
-        vm->last_error = VM_ERR_TYPE;
-        return;
+static Value *builtin_map(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    uint32_t npos = nargs - kw_count(kwnames);
+    Value *strict;
+    if (bind_keywords(vm, args + npos, kwnames, STRICT_KEYWORD, 1, &strict) != 0) return NULL;
+    if (npos < 2) return vm_fail(vm, VM_ERR_TYPE);
+
+    Value **subs;
+    if (make_sub_iters(vm, args + 1, npos - 1, &subs) != 0) return NULL;
+
+    Value *iter = value_new_iterator(ITER_MAP);
+    if (!iter) {
+        free_sub_iters(subs, npos - 1);
+        return vm_fail(vm, VM_ERR_OOM);
     }
 
-    Value *iterable = vm_pop(vm);
-    if (!iterable) return;
-
-    if (iterable->tag != TAG_LIST) {
-        value_release(iterable);
-        vm->last_error = VM_ERR_TYPE;
-        return;
-    }
-
-    Value *result = value_new_list();
-    if (!result) {
-        value_release(iterable);
-        vm->last_error = VM_ERR_OOM;
-        return;
-    }
-
-    for (uint32_t i = 0; i < iterable->data.list.len; i++) {
-        Value *index = value_new_int((int64_t)i);
-        Value *pair = value_new_list();
-
-        if (!index || !pair ||
-            value_list_append(pair, index) != 0 ||
-            value_list_append(pair, iterable->data.list.items[i]) != 0 ||
-            value_list_append(result, pair) != 0) {
-            value_release(index);
-            value_release(pair);
-            value_release(result);
-            value_release(iterable);
-            vm->last_error = VM_ERR_OOM;
-            return;
-        }
-
-        value_release(index);
-        value_release(pair);
-    }
-
-    value_release(iterable);
-    vm_push_owned(vm, result);
+    iter->data.iter->func = value_retain(args[0]);
+    iter->data.iter->subs = subs;
+    iter->data.iter->nsubs = npos - 1;
+    iter->data.iter->strict = strict ? value_truthy(strict) : 0;
+    return iter;
 }
 
-typedef void (*BuiltinHandler)(VM *vm, uint32_t nargs);
+static Value *builtin_filter(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    if (check_positional(vm, nargs, kwnames, 2, 2) != 0) return NULL;
+
+    Value *sub = value_make_iter(vm, args[1]);
+    if (!sub) return NULL;
+
+    Value *iter = value_new_iterator(ITER_FILTER);
+    if (!iter) {
+        value_release(sub);
+        return vm_fail(vm, VM_ERR_OOM);
+    }
+
+    iter->data.iter->source = sub;
+    iter->data.iter->func = value_retain(args[0]);
+    return iter;
+}
+
+static Value *builtin_reversed(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    if (check_positional(vm, nargs, kwnames, 1, 1) != 0) return NULL;
+
+    Value *seq = args[0];
+
+    switch (seq->tag) {
+        case TAG_LIST:
+        case TAG_TUPLE:
+        case TAG_STRING:
+        case TAG_BYTES:
+        case TAG_RANGE:
+        case TAG_DICT:
+        case TAG_DICT_VIEW:
+            break;
+        default:
+            return vm_fail(vm, VM_ERR_TYPE);
+    }
+
+    Value *iter = value_new_iterator(ITER_REVERSED);
+    if (!iter) return vm_fail(vm, VM_ERR_OOM);
+
+    IterObject *it = iter->data.iter;
+    it->source = value_retain(seq);
+    it->length = value_length(seq);
+    it->index = seq->tag == TAG_STRING ? (int64_t)seq->data.str.len : it->length - 1;
+    return iter;
+}
+
+static Value *builtin_iter(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    if (check_positional(vm, nargs, kwnames, 1, 2) != 0) return NULL;
+    if (nargs == 1) return value_make_iter(vm, args[0]);
+    if (!is_callable(args[0])) return vm_fail(vm, VM_ERR_TYPE);
+
+    Value *iter = value_new_iterator(ITER_CALLABLE);
+    if (!iter) return vm_fail(vm, VM_ERR_OOM);
+
+    iter->data.iter->func = value_retain(args[0]);
+    iter->data.iter->source = value_retain(args[1]);
+    return iter;
+}
+
+static Value *builtin_next(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    if (check_positional(vm, nargs, kwnames, 1, 2) != 0) return NULL;
+    if (args[0]->tag != TAG_ITERATOR) return vm_fail(vm, VM_ERR_TYPE);
+
+    Value *item = iterator_next(vm, args[0]);
+    if (item) return item;
+    if (vm->last_error != VM_ERR_OK) return NULL;
+    if (nargs == 2) return value_retain(args[1]);
+    return vm_fail(vm, VM_ERR_STOP);
+}
 
 typedef struct {
     const char *name;
-    BuiltinHandler handler;
+    NativeFn fn;
 } BuiltinEntry;
 
 static const BuiltinEntry BUILTINS[] = {
     {"print", builtin_print},
+    {"len", builtin_len},
+    {"repr", builtin_repr},
     {"enumerate", builtin_enumerate},
+    {"zip", builtin_zip},
+    {"map", builtin_map},
+    {"filter", builtin_filter},
+    {"reversed", builtin_reversed},
+    {"iter", builtin_iter},
+    {"next", builtin_next},
+    {"abs", builtin_abs},
+    {"divmod", builtin_divmod},
+    {"pow", builtin_pow},
+    {"round", builtin_round},
+    {"sum", builtin_sum},
+    {"min", builtin_min},
+    {"max", builtin_max},
+    {"sorted", builtin_sorted},
+    {"any", builtin_any},
+    {"all", builtin_all},
+    {"isinstance", builtin_isinstance},
+    {"callable", builtin_callable},
+    {"id", builtin_id},
+    {"ord", builtin_ord},
+    {"chr", builtin_chr},
+    {"bin", builtin_bin},
+    {"oct", builtin_oct},
+    {"hex", builtin_hex},
+    {"format", builtin_format},
+    {"ascii", builtin_ascii},
 };
 
 #define BUILTIN_COUNT ((uint32_t)(sizeof(BUILTINS) / sizeof(BUILTINS[0])))
@@ -243,10 +288,6 @@ const char *builtin_name(uint32_t index) {
     return index < BUILTIN_COUNT ? BUILTINS[index].name : NULL;
 }
 
-void builtin_invoke(VM *vm, uint32_t index, uint32_t nargs) {
-    if (index >= BUILTIN_COUNT) {
-        vm->last_error = VM_ERR_FUNC_NOT_FOUND;
-        return;
-    }
-    BUILTINS[index].handler(vm, nargs);
+NativeFn builtin_function(uint32_t index) {
+    return index < BUILTIN_COUNT ? BUILTINS[index].fn : NULL;
 }

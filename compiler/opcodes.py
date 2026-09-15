@@ -10,6 +10,11 @@ CANONICAL_OPCODES = {
     "POP_TOP":          0x06,
     "DUP_TOP":          0x07,
     "ROT_TWO":          0x08,
+    "ROT_THREE":        0x09,
+    "DELETE_FAST":      0x0A,
+    "DELETE_GLOBAL":    0x0B,
+    "DELETE_SUBSCR":    0x0C,
+    "DUP_TOP_TWO":      0x0D,
 
     "BINARY_ADD":       0x10,
     "BINARY_SUB":       0x11,
@@ -22,6 +27,11 @@ CANONICAL_OPCODES = {
     "UNARY_NOT":        0x18,
     "UNARY_POS":        0x19,
     "UNARY_INVERT":     0x1A,
+    "BINARY_AND":       0x1B,
+    "BINARY_OR":        0x1C,
+    "BINARY_XOR":       0x1D,
+    "BINARY_LSHIFT":    0x1E,
+    "BINARY_RSHIFT":    0x1F,
 
     "COMPARE_EQ":       0x20,
     "COMPARE_NE":       0x21,
@@ -48,7 +58,13 @@ CANONICAL_OPCODES = {
     "GET_INDEX":        0x53,
     "SET_INDEX":        0x54,
     "GET_ITER_ITEM":    0x5B,
+    "GET_ITER":         0x5C,
+    "FOR_ITER":         0x5D,
+    "UNPACK_SEQUENCE":  0x5E,
+    "UNPACK_EX":        0x5F,
     "GET_SLICE":        0x5A,
+    "FORMAT_VALUE":     0x63,
+    "BUILD_STRING":     0x64,
     "LIST_APPEND":      0x55,
     "SET_ADD":          0x58,
     "MAP_ADD":          0x59,
@@ -57,6 +73,7 @@ CANONICAL_OPCODES = {
     "PRINT":            0x60,
     "CALL_BUILTIN":     0x61,
     "CALL_METHOD":      0x62,
+    "CALL_METHOD_KW":   0x65,
 
     "HALT":             0xFF,
 }
@@ -87,8 +104,16 @@ OPERAND_WIDTHS = {
     "BUILD_TUPLE":      4,
     "BUILD_MAP":        4,
     "BUILD_SET":        4,
+    "FOR_ITER":         4,
+    "UNPACK_SEQUENCE":  4,
+    "UNPACK_EX":        4,
+    "DELETE_FAST":      4,
+    "DELETE_GLOBAL":    4,
+    "BUILD_STRING":     4,
+    "FORMAT_VALUE":     4,
     "PRINT":            4,
     "CALL_METHOD":      4,
+    "CALL_METHOD_KW":   4,
     "POP_JUMP_IF_FALSE":4,
     "POP_JUMP_IF_TRUE": 4,
     "JUMP_ABSOLUTE":    4,
@@ -105,7 +130,7 @@ def operand_width_for_code(op: int) -> int:
 
 OPERAND_WIDTH = operand_width_for_code
 
-OPCODE_TABLE_VERSION = 4
+OPCODE_TABLE_VERSION = 8
 
 _globals = globals()
 for _name, _value in OPCODES.items():

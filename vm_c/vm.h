@@ -70,6 +70,13 @@ struct VM {
 #define VM_ERR_FUNC_NOT_FOUND -9
 #define VM_ERR_INVALID_OP  -10
 #define VM_ERR_OVERFLOW  -11
+#define VM_ERR_VALUE     -12
+#define VM_ERR_STOP      -13
+#define VM_ERR_KEY       -14
+#define VM_ERR_ATTR      -15
+#define VM_ERR_RUNTIME   -16
+#define VM_ERR_LOOKUP    -17
+#define VM_ERR_UNICODE   -18
 
 int vm_load_memory(VM *vm, const uint8_t *data, size_t len);
 

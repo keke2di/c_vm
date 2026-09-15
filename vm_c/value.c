@@ -153,6 +153,26 @@ Value *value_new_set(void) {
     return v;
 }
 
+Value *value_new_frozenset(void) {
+    Value *v = value_new_set();
+
+    if (v) {
+        v->tag = TAG_FROZENSET;
+    }
+
+    return v;
+}
+
+Value *value_new_dict_view(Value *dict, ViewKind kind) {
+    Value *v = value_alloc(TAG_DICT_VIEW);
+
+    if (!v) return NULL;
+
+    v->data.view.dict = value_retain(dict);
+    v->data.view.kind = kind;
+    return v;
+}
+
 Value *value_new_none(void) {
     return &g_none;
 }
@@ -183,6 +203,41 @@ Value *value_new_function(FunctionKind kind, uint32_t index, const char *name) {
     v->data.func->kind = kind;
     v->data.func->index = index;
     v->data.func->name = name;
+    return v;
+}
+
+int64_t value_range_len(int64_t start, int64_t stop, int64_t step) {
+    if (step > 0) {
+        if (stop <= start) return 0;
+        return ((int64_t)((uint64_t)stop - (uint64_t)start) - 1) / step + 1;
+    }
+    if (stop >= start) return 0;
+    return ((int64_t)((uint64_t)start - (uint64_t)stop) - 1) / (-step) + 1;
+}
+
+Value *value_new_range(int64_t start, int64_t stop, int64_t step) {
+    Value *v = value_alloc(TAG_RANGE);
+
+    if (!v) return NULL;
+
+    v->data.range.start = start;
+    v->data.range.stop = stop;
+    v->data.range.step = step;
+    return v;
+}
+
+Value *value_new_iterator(IterKind kind) {
+    Value *v = value_alloc(TAG_ITERATOR);
+
+    if (!v) return NULL;
+
+    v->data.iter = calloc(1, sizeof(IterObject));
+    if (!v->data.iter) {
+        free(v);
+        return NULL;
+    }
+
+    v->data.iter->kind = kind;
     return v;
 }
 
@@ -242,6 +297,7 @@ void value_release(Value *v) {
             break;
 
         case TAG_SET:
+        case TAG_FROZENSET:
             if (v->data.set.items) {
                 for (uint32_t i = 0; i < v->data.set.len; i++) {
                     value_release(v->data.set.items[i]);
@@ -251,8 +307,26 @@ void value_release(Value *v) {
             }
             break;
 
+        case TAG_DICT_VIEW:
+            value_release(v->data.view.dict);
+            break;
+
         case TAG_FUNCTION:
             free(v->data.func);
+            break;
+
+        case TAG_ITERATOR:
+            if (v->data.iter) {
+                if (v->data.iter->source) value_release(v->data.iter->source);
+                if (v->data.iter->func) value_release(v->data.iter->func);
+                if (v->data.iter->subs) {
+                    for (uint32_t i = 0; i < v->data.iter->nsubs; i++) {
+                        value_release(v->data.iter->subs[i]);
+                    }
+                    free(v->data.iter->subs);
+                }
+                free(v->data.iter);
+            }
             break;
 
         default:
@@ -279,8 +353,9 @@ void value_list_set(Value *v, size_t idx, Value *item) {
     if (!v || v->tag != TAG_LIST) return;
     if (idx >= v->data.list.len) return;
 
-    value_release(v->data.list.items[idx]);
+    Value *old = v->data.list.items[idx];
     v->data.list.items[idx] = value_retain(item);
+    value_release(old);
 }
 
 int value_list_append(Value *list, Value *item) {
@@ -318,13 +393,36 @@ Value *value_tuple_get(const Value *v, size_t idx) {
     return v->data.tuple.items[idx];
 }
 
+int value_is_hashable(const Value *v) {
+    if (!v) return 0;
+
+    switch (v->tag) {
+        case TAG_LIST:
+        case TAG_DICT:
+        case TAG_SET:
+        case TAG_DICT_VIEW:
+            return 0;
+
+        case TAG_TUPLE:
+            for (uint32_t i = 0; i < v->data.tuple.len; i++) {
+                if (!value_is_hashable(v->data.tuple.items[i])) return 0;
+            }
+            return 1;
+
+        default:
+            return 1;
+    }
+}
+
 int value_dict_set(Value *dict, Value *key, Value *value) {
     if (!dict || dict->tag != TAG_DICT) return -1;
+    if (!value_is_hashable(key)) return -2;
 
     for (uint32_t i = 0; i < dict->data.dict.len; i++) {
-        if (value_compare(dict->data.dict.entries[i].key, key) == 0) {
-            value_release(dict->data.dict.entries[i].value);
+        if (value_equal(dict->data.dict.entries[i].key, key)) {
+            Value *old = dict->data.dict.entries[i].value;
             dict->data.dict.entries[i].value = value_retain(value);
+            value_release(old);
             return 0;
         }
     }
@@ -363,10 +461,7 @@ Value *value_dict_get(const Value *dict, Value *key) {
     if (!dict || dict->tag != TAG_DICT) return NULL;
 
     for (uint32_t i = 0; i < dict->data.dict.len; i++) {
-        if (value_compare(
-                dict->data.dict.entries[i].key,
-                key
-            ) == 0) {
+        if (value_equal(dict->data.dict.entries[i].key, key)) {
             return dict->data.dict.entries[i].value;
         }
     }
@@ -381,8 +476,30 @@ Value *value_dict_key_at(const Value *dict, size_t index) {
     return dict->data.dict.entries[index].key;
 }
 
+int value_dict_delete(Value *dict, const Value *key) {
+    if (!dict || dict->tag != TAG_DICT) return 0;
+
+    DictEntry *entries = dict->data.dict.entries;
+
+    for (uint32_t i = 0; i < dict->data.dict.len; i++) {
+        if (value_equal(entries[i].key, key)) {
+            Value *old_key = entries[i].key;
+            Value *old_value = entries[i].value;
+            memmove(&entries[i], &entries[i + 1],
+                    (dict->data.dict.len - i - 1) * sizeof(DictEntry));
+            dict->data.dict.len--;
+            value_release(old_key);
+            value_release(old_value);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 int value_set_add(Value *set, Value *item) {
-    if (!set || set->tag != TAG_SET) return -1;
+    if (!set || (set->tag != TAG_SET && set->tag != TAG_FROZENSET)) return -1;
+    if (!value_is_hashable(item)) return -2;
 
     if (value_set_contains(set, item)) return 0;
 
@@ -412,10 +529,10 @@ int value_set_add(Value *set, Value *item) {
 }
 
 int value_set_contains(const Value *set, Value *item) {
-    if (!set || set->tag != TAG_SET) return 0;
+    if (!set || (set->tag != TAG_SET && set->tag != TAG_FROZENSET)) return 0;
 
     for (uint32_t i = 0; i < set->data.set.len; i++) {
-        if (value_compare(set->data.set.items[i], item) == 0) {
+        if (value_equal(set->data.set.items[i], item)) {
             return 1;
         }
     }
@@ -444,10 +561,20 @@ int value_truthy(const Value *v) {
         case TAG_DICT:
             return v->data.dict.len != 0;
         case TAG_SET:
+        case TAG_FROZENSET:
             return v->data.set.len != 0;
+        case TAG_DICT_VIEW:
+            return v->data.view.dict->data.dict.len != 0;
         case TAG_FUNCTION:
             return 1;
         case TAG_TYPE:
+            return 1;
+        case TAG_RANGE:
+            return value_range_len(
+                v->data.range.start,
+                v->data.range.stop,
+                v->data.range.step) != 0;
+        case TAG_ITERATOR:
             return 1;
         default:
             return 0;

@@ -1,3 +1,5 @@
+#include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
 #include "platform.h"
@@ -51,4 +53,50 @@ uint8_t *platform_read_executable(size_t *out_len) {
     CloseHandle(file);
     *out_len = (size_t)size.QuadPart;
     return data;
+}
+
+static HANDLE platform_stdout(int *is_console) {
+    static HANDLE handle = NULL;
+    static int console = 0;
+
+    if (!handle) {
+        DWORD mode = 0;
+        handle = GetStdHandle(STD_OUTPUT_HANDLE);
+        console = handle != NULL &&
+                  handle != INVALID_HANDLE_VALUE &&
+                  GetConsoleMode(handle, &mode) != 0;
+    }
+
+    *is_console = console;
+    return handle;
+}
+
+void platform_write_stdout(const char *data, size_t len) {
+    if (len == 0) return;
+
+    int is_console = 0;
+    HANDLE handle = platform_stdout(&is_console);
+
+    if (!is_console) {
+        fwrite(data, 1, len, stdout);
+        return;
+    }
+
+    if (len > (size_t)INT_MAX) return;
+
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, data, (int)len, NULL, 0);
+    if (wide_len <= 0) {
+        fwrite(data, 1, len, stdout);
+        return;
+    }
+
+    wchar_t *wide = malloc((size_t)wide_len * sizeof(wchar_t));
+    if (!wide) return;
+
+    if (MultiByteToWideChar(CP_UTF8, 0, data, (int)len, wide, wide_len) == wide_len) {
+        DWORD written = 0;
+        WriteConsoleW(handle, wide, (DWORD)wide_len, &written, NULL);
+    }
+
+    free(wide);
 }

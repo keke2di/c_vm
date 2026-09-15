@@ -21,14 +21,13 @@ What cVM supports, and where it behaves differently from Python.
 
 ## Status labels
 
-cVM aims for predictable behavior, not full Python compatibility. Constructs outside this matrix are rejected by the compiler or stopped with a runtime error.
+cVM aims for predictable behavior and, within the supported subset, output that matches CPython 3.14. Constructs outside this matrix are rejected by the compiler or stopped with a runtime error.
 
 | Label | Meaning |
 |:------|:--------|
 | <span class="label label-green">Supported</span> | Behaves like Python for normal use |
 | <span class="label label-yellow">Partial</span> | Works within the limits noted |
 | <span class="label label-purple">Differs</span> | Works, but the result is not what Python gives |
-| <span class="label label-blue">cVM extension</span> | Not valid Python, but accepted by cVM |
 | <span class="label label-red">Not supported</span> | Rejected by the compiler, or a runtime error |
 
 ## Program structure
@@ -48,36 +47,39 @@ cVM aims for predictable behavior, not full Python compatibility. Constructs out
 
 | Type | Status | Notes |
 |:-----|:-------|:------|
-| `None` | <span class="label label-green">Supported</span> | |
-| `bool` | <span class="label label-yellow">Partial</span> | A subtype of `int`: `True`/`False` print as `True`/`False` but equal `1`/`0` and behave as integers in arithmetic, indexing, and dict keys. Comparisons, membership, and `not` produce `bool`. |
+| `None` | <span class="label label-green">Supported</span> | A single shared object; `is` works. |
+| `bool` | <span class="label label-green">Supported</span> | A subtype of `int`: `True`/`False` print as themselves but equal `1`/`0` and behave as integers in arithmetic, indexing, and dict keys. |
 | `int` | <span class="label label-yellow">Partial</span> | Signed 64-bit. Overflow is a runtime error; there are no big integers. |
-| `float` | <span class="label label-yellow">Partial</span> | IEEE double precision arithmetic. Printing differs, see [Printing](#printing-and-string-conversion). |
-| `str` | <span class="label label-green">Supported</span> | |
-| `bytes` | <span class="label label-yellow">Partial</span> | Literals, indexing, slicing, iteration (yields integers), `len`, `in`, comparisons. |
+| `float` | <span class="label label-green">Supported</span> | IEEE double precision. Prints with the shortest round-trip form, as in Python. |
+| `str` | <span class="label label-green">Supported</span> | Full Unicode: `len`, indexing, slicing, and iteration are by code point. |
+| `bytes` | <span class="label label-green">Supported</span> | Literals, indexing, slicing, iteration (yields integers), `len`, `in`, comparisons, `.decode()`. |
 | `list` | <span class="label label-green">Supported</span> | |
 | `tuple` | <span class="label label-green">Supported</span> | |
-| `dict` | <span class="label label-yellow">Partial</span> | Literals, lookup by key, iteration over keys, `in`, `len`, `get`. Item assignment `d[k] = v` works only with string keys. |
-| `set` | <span class="label label-yellow">Partial</span> | Literals, `in`, `len`, `add`. Not iterable in `for` loops or comprehensions. |
+| `dict` | <span class="label label-green">Supported</span> | Any hashable key. Lookup, `d[k] = v`, `del`, `in`, `len`, iteration, `.get()`, `.keys()`, `.values()`, `.items()`. |
+| `set` | <span class="label label-green">Supported</span> | Literals, `in`, `len`, iteration, `.add()`. Iteration order is insertion order, not Python's hash order. |
+| `frozenset` | <span class="label label-green">Supported</span> | Hashable; usable as a dict key or set element. |
+| `range` | <span class="label label-green">Supported</span> | A lazy object: indexing, `len`, `in`, `==`, iteration, negative steps. |
+| Dict views | <span class="label label-green">Supported</span> | `dict.keys()`, `.values()`, `.items()` are live views. |
 | Functions | <span class="label label-green">Supported</span> | User-defined and built-in functions are first-class values. |
+| `complex` | <span class="label label-red">Not supported</span> | |
 
 ## Statements
 
 | Statement | Status | Notes |
 |:----------|:-------|:------|
-| `x = value` | <span class="label label-green">Supported</span> | Single target only. |
-| `a[i] = value` | <span class="label label-yellow">Partial</span> | Lists with integer indexes (negative allowed), dicts with string keys. |
-| `a = b = 1`, `a, b = pair`, starred targets | <span class="label label-red">Not supported</span> | |
-| `x: int = 1` | <span class="label label-red">Not supported</span> | |
-| `x += value` and other augmented assignment | <span class="label label-yellow">Partial</span> | Simple names only. |
+| `x = value` | <span class="label label-green">Supported</span> | |
+| `a, b = ...`, `a = b = c`, `a, *rest = ...` | <span class="label label-green">Supported</span> | Tuple/list targets, nesting, and one starred target. |
+| `a[i] = value` | <span class="label label-green">Supported</span> | Lists by integer index (negative allowed); dicts by any hashable key. |
+| `x: int = 1` | <span class="label label-red">Not supported</span> | Variable annotations are rejected. |
+| `x += value` and other augmented assignment | <span class="label label-green">Supported</span> | Names and subscripts (`x[i] += 1`). |
 | `if` / `elif` / `else` | <span class="label label-green">Supported</span> | |
-| `while` | <span class="label label-green">Supported</span> | |
-| `for` | <span class="label label-yellow">Partial</span> | The target must be a simple name. Iterates lists, tuples, strings, bytes and dict keys. Loops can be nested. |
-| `for i in range(...)` | <span class="label label-yellow">Partial</span> | 1 to 3 integer constant arguments, non-negative step. The loop variable is the counter, so assigning to it inside the body changes the iteration. |
-| `for ... else`, `while ... else` | <span class="label label-red">Not supported</span> | |
+| `while`, `while ... else` | <span class="label label-green">Supported</span> | |
+| `for`, `for ... else` | <span class="label label-green">Supported</span> | Iterates any iterable; the target may be a name or a tuple/list to unpack. |
 | `break`, `continue`, `pass`, `return` | <span class="label label-green">Supported</span> | |
+| `del` | <span class="label label-green">Supported</span> | Names and subscripts (`del x`, `del d[k]`). Slice deletion is not supported. |
 | `global`, `nonlocal` | <span class="label label-red">Not supported</span> | |
-| `del`, `assert` | <span class="label label-red">Not supported</span> | |
-| `try` / `except` / `finally`, `raise` | <span class="label label-red">Not supported</span> | |
+| `assert` | <span class="label label-red">Not supported</span> | |
+| `try` / `except` / `finally`, `raise` | <span class="label label-red">Not supported</span> | A runtime error stops the program. |
 | `with` | <span class="label label-red">Not supported</span> | |
 | `yield`, `async`, `await` | <span class="label label-red">Not supported</span> | |
 
@@ -86,30 +88,30 @@ cVM aims for predictable behavior, not full Python compatibility. Constructs out
 | Expression | Status | Notes |
 |:-----------|:-------|:------|
 | Literals | <span class="label label-green">Supported</span> | Numbers, strings, bytes, `None`, `True`, `False`, lists, tuples, sets, dicts. Complex numbers are not supported. |
-| `+ - * // % **` | <span class="label label-yellow">Partial</span> | Numeric operands. `+` also joins strings. `//` and `%` follow Python's sign rules. |
-| `/` on two integers | <span class="label label-purple">Differs</span> | Truncating integer division instead of a float: `7 / 2` is `3`, `-7 / 2` is `-3`. With a float operand the result is a float. |
-| `str + number` | <span class="label label-purple">Differs</span> | Converts the number to text instead of raising `TypeError`. |
-| List or tuple concatenation, sequence repetition | <span class="label label-red">Not supported</span> | |
-| `== != < <= > >=` | <span class="label label-yellow">Partial</span> | Numbers, strings and bytes. Tuples with `==` and `!=` only. Comparing other types is a runtime type error, including `x == None`, lists, dicts and functions. |
-| Chained comparisons `a < b < c` | <span class="label label-red">Not supported</span> | |
-| `is`, `is not` | <span class="label label-green">Supported</span> | Identity comparison; `None`, `True`, `False`, and type objects are singletons. |
-| `in`, `not in` | <span class="label label-green">Supported</span> | Lists, tuples, strings, bytes, dict keys, sets. |
-| `and`, `or`, `not` | <span class="label label-green">Supported</span> | `and` and `or` return one of their operands, as in Python. |
+| `+ - * / // % **` | <span class="label label-green">Supported</span> | `+`/`*` also concatenate and repeat sequences. `//` and `%` follow Python's sign rules. |
+| `/` | <span class="label label-green">Supported</span> | True division; always returns a `float` (`7 / 2` is `3.5`). |
+| `& \| ^ << >> ~` | <span class="label label-green">Supported</span> | Integers only. Shifts reject negative counts and detect 64-bit overflow. |
+| `== != < <= > >=` | <span class="label label-green">Supported</span> | `==`/`!=` compare by value across all types and never raise (`x == None` is `False`). Ordering works on numbers, strings, bytes, lists, and tuples; mismatched types raise. |
+| Chained comparisons `a < b < c` | <span class="label label-green">Supported</span> | Single evaluation and short-circuiting, as in Python. |
+| `is`, `is not` | <span class="label label-green">Supported</span> | Identity comparison. |
+| `in`, `not in` | <span class="label label-green">Supported</span> | Lists, tuples, strings, bytes, dicts, sets, ranges, dict views. |
+| `and`, `or`, `not` | <span class="label label-green">Supported</span> | `and`/`or` return one of their operands. |
 | Unary `-`, `+`, `~` | <span class="label label-green">Supported</span> | `~` on integers only. |
-| Indexing `x[i]` | <span class="label label-green">Supported</span> | Lists, tuples, strings and bytes by integer index, negative indexes included; dicts by key. |
-| Slicing `x[a:b:c]` | <span class="label label-green">Supported</span> | Lists, tuples, strings, bytes. Bounds must be integers or omitted. Negative steps work. |
-| Calls | <span class="label label-green">Supported</span> | Any expression that evaluates to a function can be called: `f(x)`, `choose()(x)`, `ops[0](x)`. |
+| Indexing `x[i]` | <span class="label label-green">Supported</span> | Sequences by integer index (negatives included); dicts by key; ranges. |
+| Slicing `x[a:b:c]` | <span class="label label-green">Supported</span> | Lists, tuples, strings, bytes. Negative steps work. Slice assignment is not supported. |
+| Calls | <span class="label label-green">Supported</span> | Any expression that evaluates to a function: `f(x)`, `choose()(x)`, `ops[0](x)`. |
 | Method calls `obj.method(...)` | <span class="label label-yellow">Partial</span> | See [Methods](#methods). |
 | Other attribute access | <span class="label label-red">Not supported</span> | |
-| `x if cond else y` | <span class="label label-red">Not supported</span> | |
-| f-strings | <span class="label label-red">Not supported</span> | |
-| `:=`, starred expressions, `**` in dict literals | <span class="label label-red">Not supported</span> | |
+| `x if cond else y` | <span class="label label-green">Supported</span> | |
+| f-strings | <span class="label label-green">Supported</span> | Full format-spec mini-language and `!r`/`!s`/`!a` conversions. |
+| `:=`, `*` in calls, `**` in dict literals | <span class="label label-red">Not supported</span> | |
+| Generator expressions | <span class="label label-red">Not supported</span> | Use a list comprehension. |
 
 ## Comprehensions
 
 | Feature | Status | Notes |
 |:--------|:-------|:------|
-| List, set, dict comprehensions | <span class="label label-yellow">Partial</span> | One `for` clause with a simple-name target and no `if` clause. Comprehensions can be nested. |
+| List, set, dict comprehensions | <span class="label label-green">Supported</span> | Multiple `for` clauses, `if` filters, and tuple targets. Comprehensions can be nested. |
 | Comprehension variable scope | <span class="label label-purple">Differs</span> | The loop variable stays defined after the comprehension. |
 | Generator expressions | <span class="label label-red">Not supported</span> | |
 
@@ -118,9 +120,9 @@ cVM aims for predictable behavior, not full Python compatibility. Constructs out
 | Feature | Status | Notes |
 |:--------|:-------|:------|
 | Positional parameters | <span class="label label-green">Supported</span> | Argument count is checked at runtime. |
-| Keyword arguments | <span class="label label-green">Supported</span> | `f(1, b=2)`, also through function values. Built-in functions and method calls do not accept keyword arguments. |
-| Default parameter values | <span class="label label-yellow">Partial</span> | Defaults must be constant expressions: numbers, strings, bytes, `None`, `True`, `False` and tuples of these. They are fixed at compile time instead of being evaluated when `def` runs. |
-| Functions as values | <span class="label label-green">Supported</span> | Assign, pass, return and store functions, including built-ins: `p = print`. |
+| Keyword arguments | <span class="label label-green">Supported</span> | For user functions, built-in functions, type constructors, and methods. |
+| Default parameter values | <span class="label label-yellow">Partial</span> | Defaults must be constant expressions: numbers, strings, bytes, `None`, `True`, `False`, and tuples of these. They are fixed at compile time. |
+| Functions as values | <span class="label label-green">Supported</span> | Assign, pass, return, and store functions, including built-ins: `p = print`. |
 | Shadowing built-ins | <span class="label label-green">Supported</span> | A top-level `def str(...)` replaces the built-in `str`. |
 | Parameter and return annotations | <span class="label label-yellow">Partial</span> | Accepted and ignored. Type parameters (`def f[T]()`) are not supported. |
 | `*args`, `**kwargs`, keyword-only and positional-only parameters | <span class="label label-red">Not supported</span> | |
@@ -141,46 +143,59 @@ cVM aims for predictable behavior, not full Python compatibility. Constructs out
 
 ## Built-in functions
 
+Every built-in below matches CPython's result for the supported argument forms, including keyword arguments.
+
 | Built-in | Status | Notes |
 |:---------|:-------|:------|
-| `print(*values)` | <span class="label label-yellow">Partial</span> | Values are separated by spaces. Returns `None`. `sep`, `end` and `file` are not supported. See [Printing](#printing-and-string-conversion). |
-| `str(x)` | <span class="label label-purple">Differs</span> | Uses the same text as `print`. See [Printing](#printing-and-string-conversion). |
-| `len(x)` | <span class="label label-green">Supported</span> | str, bytes, list, tuple, dict, set. Compiled to an instruction unless `len` is a parameter or local of the current function, or the module has a top-level `def len`. It cannot be used as a value, and `len = ...` at module level does not replace it. |
-| `int(x)` | <span class="label label-yellow">Partial</span> | From an int, a float (truncates toward zero) or a base-10 string. |
-| `float(x)` | <span class="label label-yellow">Partial</span> | From a float, an int or a string. |
-| `list(*items)` | <span class="label label-purple">Differs</span> | Builds a list from its arguments: `list(1, 2)` gives `[1, 2]`. It does not convert an iterable. |
-| `enumerate(items)` | <span class="label label-purple">Differs</span> | Lists only. Returns a list of `[index, item]` lists. |
-| `append(items, value)` | <span class="label label-blue">cVM extension</span> | Same as `items.append(value)`. |
-| `range(...)` | <span class="label label-yellow">Partial</span> | Only directly as the iterable of a `for` statement. |
-| `type(x)` | <span class="label label-green">Supported</span> | Returns the object's type; `type(1) is int`. The built-in type names are type objects. |
-| Other built-ins (`abs`, `min`, `max`, `sum`, `zip`, `sorted`, `isinstance`, `input`, `open`, ...) | <span class="label label-red">Not supported</span> | |
+| `print(*values, sep, end, flush)` | <span class="label label-yellow">Partial</span> | `sep`, `end`, and `flush` work. `file` accepts only `None`. |
+| `len`, `repr`, `ascii`, `format` | <span class="label label-green">Supported</span> | |
+| `abs`, `divmod`, `pow`, `round` | <span class="label label-green">Supported</span> | `pow` includes 3-argument modular form. Results outside 64-bit `int` overflow. |
+| `sum`, `min`, `max`, `sorted` | <span class="label label-green">Supported</span> | `min`/`max`/`sorted` take `key=`; `min`/`max` take `default=`; `sorted` takes `reverse=` and is stable. |
+| `any`, `all` | <span class="label label-green">Supported</span> | |
+| `enumerate`, `zip`, `map`, `filter`, `reversed` | <span class="label label-green">Supported</span> | Return lazy iterators. `zip`/`map` accept `strict=`. |
+| `iter`, `next` | <span class="label label-green">Supported</span> | `iter(callable, sentinel)` and `next(it, default)` are supported. |
+| `isinstance`, `callable`, `id` | <span class="label label-green">Supported</span> | `isinstance` takes a type or a tuple of types. |
+| `ord`, `chr` | <span class="label label-green">Supported</span> | |
+| `bin`, `oct`, `hex` | <span class="label label-green">Supported</span> | |
+| `int`, `float`, `str`, `bool` | <span class="label label-green">Supported</span> | `int(x, base)` and `float`/`int` string parsing match CPython, including underscores and `0x`/`0o`/`0b` prefixes. `str(bytes, encoding)` decodes. |
+| `list`, `tuple`, `set`, `frozenset`, `dict`, `bytes`, `range`, `type` | <span class="label label-green">Supported</span> | The container constructors build from any iterable. |
+| `hash`, `input`, `open`, `sorted`… others | <span class="label label-red">Not supported</span> | `hash`, `input`, `open`, `vars`, `getattr`, `super`, etc. are not available. |
 
 ## Methods
 
+More methods arrive in later releases; the ones below are available now.
+
 | Method | Status | Notes |
 |:-------|:-------|:------|
-| `list.append(value)` | <span class="label label-purple">Differs</span> | Returns `0` instead of `None`. |
-| `dict.get(key)` | <span class="label label-purple">Differs</span> | One argument only. Returns `0` when the key is missing. |
-| `set.add(value)` | <span class="label label-purple">Differs</span> | Returns `0` instead of `None`. |
-| Other methods (`str.split`, `list.pop`, `dict.items`, ...) | <span class="label label-red">Not supported</span> | Calling them is a runtime type error. |
+| `list.append(value)` | <span class="label label-green">Supported</span> | Returns `None`. |
+| `dict.get(key[, default])` | <span class="label label-green">Supported</span> | Returns `None` (or the default) when the key is missing. |
+| `dict.keys()`, `dict.values()`, `dict.items()` | <span class="label label-green">Supported</span> | Live view objects. |
+| `set.add(value)` | <span class="label label-green">Supported</span> | Returns `None`. |
+| `str.encode([encoding[, errors]])` | <span class="label label-green">Supported</span> | `utf-8`, `utf-8-sig`, `ascii`, `latin-1`. |
+| `bytes.decode([encoding[, errors]])` | <span class="label label-green">Supported</span> | Same encodings. |
+| Other methods (`str.split`, `list.pop`, `dict.update`, `set.union`, ...) | <span class="label label-red">Not supported</span> | Calling them is a runtime error. |
 
 ## Printing and string conversion
 
-`print` and `str` produce the following text:
+`print` and `str` produce Python's `str()` text, and `repr` produces Python's `repr()`:
 
-| Value | Text |
-|:------|:-----|
-| `int` | `42` |
-| `bool` | `True` or `False` |
-| `float` | C `%g` format with up to 6 significant digits: `1.0` prints `1`, `2.5` prints `2.5`, `1e20` prints `1e+20`, `0.1 + 0.2` prints `0.3` |
-| `str` | The text itself |
-| `None` | `None` |
-| `list` | A summary such as `[list len=3]`, not the items |
-| `tuple` | `(tuple len=3)` |
-| `dict` | `{dict len=3}` |
-| `set` | `{set len=3}` |
-| `bytes` | `[bytes len=3]` |
-| Function | `<function add>` or `<built-in function print>` |
+| Value | `str` / `print` | `repr` |
+|:------|:-----|:-----|
+| `int` | `42` | `42` |
+| `bool` | `True` | `True` |
+| `float` | `1.0`, `2.5`, `0.30000000000000004`, `1e+20` (shortest round-trip) | same |
+| `str` | the text itself | `'text'` with quotes and escapes |
+| `None` | `None` | `None` |
+| `list` | `[1, 2, 3]` | `[1, 2, 3]` |
+| `tuple` | `(1, 2)` | `(1, 2)` |
+| `dict` | `{'a': 1}` | `{'a': 1}` |
+| `set` | `{1, 2}` | `{1, 2}` |
+| `bytes` | `b'abc'` | `b'abc'` |
+| `range` | `range(0, 5)` | `range(0, 5)` |
+| Function | `<function add>` or `<built-in function print>` | same |
+
+{: .note }
+`repr` escapes non-printable ASCII; `ascii()` also escapes every non-ASCII character (`ascii("café")` is `'caf\xe9'`). Set and `dict`-view iteration follow insertion order, which can differ from CPython's hash order. Iterator objects print as a generic `<iterator object>`.
 
 ## Runtime limits and errors
 
@@ -198,8 +213,15 @@ There is no exception handling. A runtime error stops the program, prints `VM ru
 | Error kind | Typical cause |
 |:-----------|:--------------|
 | `Type error` | Unsupported operand types, calling a non-function, argument binding errors |
-| `Division by zero` | `/`, `//` or `%` by zero |
+| `Value error` | Bad conversion (`int("x")`), `chr` out of range, wrong unpack length |
+| `Key error` | Missing dict key |
+| `Bounds error` | Sequence index out of range, invalid bytecode references |
+| `Attribute error` | Unknown method |
+| `Division by zero` | `/`, `//`, `%`, or `divmod` by zero |
 | `Integer overflow` | 64-bit integer overflow |
+| `Runtime error` | Dict or set changed size during iteration |
+| `Lookup error` | Unknown text encoding or error-handler name |
+| `Unicode error` | Encode/decode failure with the `strict` handler |
+| `StopIteration` | `next()` past the end with no default |
 | `Stack error` | Call depth or value stack exhausted |
-| `Bounds error` | Index out of range, invalid bytecode references |
-| `Function not found` | Calling or reading an undefined name |
+| `Function not found` | Reading or calling an undefined name |

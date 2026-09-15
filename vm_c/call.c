@@ -2,6 +2,8 @@
 #include <string.h>
 #include "vm_internal.h"
 
+#define SMALL_ARGS 8
+
 static int vm_install_callable(VM *vm, uint32_t name_index, FunctionKind kind, uint32_t index) {
     Value *fn = value_new_function(kind, index, vm->names[name_index]);
     if (!fn) {
@@ -177,6 +179,43 @@ static void vm_call_user(VM *vm, uint32_t func_index, uint32_t nargs, const Valu
     vm->ip = vm->bytecode + func->code_offset;
 }
 
+static Value **take_args(VM *vm, uint32_t nargs, Value **small) {
+    Value **args = small;
+
+    if (nargs > SMALL_ARGS) {
+        args = malloc(nargs * sizeof(Value *));
+        if (!args) {
+            vm->last_error = VM_ERR_OOM;
+            return NULL;
+        }
+    }
+
+    for (uint32_t i = nargs; i > 0; i--) {
+        args[i - 1] = vm_pop(vm);
+    }
+
+    return args;
+}
+
+static void drop_args(Value **args, uint32_t nargs, Value **small) {
+    for (uint32_t i = 0; i < nargs; i++) {
+        if (args[i]) value_release(args[i]);
+    }
+    if (args != small) free(args);
+}
+
+static void push_result(VM *vm, Value *result) {
+    if (vm->last_error != VM_ERR_OK) {
+        if (result) value_release(result);
+        return;
+    }
+    if (!result) {
+        vm->last_error = VM_ERR_OOM;
+        return;
+    }
+    vm_push_owned(vm, result);
+}
+
 void vm_call_value(VM *vm, uint32_t nargs, const Value *kwnames) {
     uint32_t frame_base = vm->current_frame ? vm->current_frame->stack_base : 0;
     if (vm->stack_top < frame_base || vm->stack_top - frame_base <= nargs) {
@@ -186,164 +225,112 @@ void vm_call_value(VM *vm, uint32_t nargs, const Value *kwnames) {
 
     uint32_t callable_pos = vm->stack_top - nargs - 1;
     Value *callable = vm->stack[callable_pos];
+    NativeFn native = NULL;
 
-    int is_func = callable->tag == TAG_FUNCTION && callable->data.func;
-    int is_type = callable->tag == TAG_TYPE;
+    if (callable->tag == TAG_FUNCTION && callable->data.func) {
+        if (callable->data.func->kind == FUNC_USER) {
+            uint32_t index = callable->data.func->index;
+            memmove(
+                &vm->stack[callable_pos],
+                &vm->stack[callable_pos + 1],
+                nargs * sizeof(Value*));
+            vm->stack_top--;
+            value_release(callable);
+            vm_call_user(vm, index, nargs, kwnames);
+            return;
+        }
+        native = builtin_function(callable->data.func->index);
+    } else if (callable->tag == TAG_TYPE) {
+        native = type_constructor((int)callable->data.int_val);
+    }
 
-    if (!is_func && !is_type) {
+    if (!native) {
         vm->last_error = VM_ERR_TYPE;
         return;
     }
 
-    FunctionKind kind = FUNC_USER;
-    uint32_t index = 0;
-    int type_id = 0;
+    Value *small[SMALL_ARGS];
+    Value **args = take_args(vm, nargs, small);
+    if (!args) return;
 
-    if (is_func) {
-        kind = callable->data.func->kind;
-        index = callable->data.func->index;
+    Value *callee = vm_pop(vm);
+    Value *result = native(vm, args, nargs, kwnames);
+
+    drop_args(args, nargs, small);
+    value_release(callee);
+    push_result(vm, result);
+}
+
+void vm_call_method(VM *vm, uint32_t nargs, int has_kwnames) {
+    uint32_t frame_base = vm->current_frame ? vm->current_frame->stack_base : 0;
+    uint64_t needed = (uint64_t)nargs + 2 + (has_kwnames ? 1 : 0);
+
+    if (vm->stack_top < frame_base || (uint64_t)(vm->stack_top - frame_base) < needed) {
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    Value *kwnames = has_kwnames ? vm_pop(vm) : NULL;
+    if (kwnames && (kwnames->tag != TAG_TUPLE || kwnames->data.tuple.len > nargs)) {
+        value_release(kwnames);
+        vm->last_error = VM_ERR_TYPE;
+        return;
+    }
+
+    Value *small[SMALL_ARGS];
+    Value **args = take_args(vm, nargs, small);
+    if (!args) {
+        if (kwnames) value_release(kwnames);
+        return;
+    }
+
+    Value *name = vm_pop(vm);
+    Value *self = vm_pop(vm);
+    MethodFn method = method_lookup(self, name);
+    Value *result = NULL;
+
+    if (method) {
+        result = method(vm, self, args, nargs, kwnames);
     } else {
-        type_id = (int)callable->data.int_val;
+        vm->last_error = name->tag == TAG_STRING ? VM_ERR_ATTR : VM_ERR_TYPE;
     }
 
-    if (kwnames && (is_type || kind == FUNC_BUILTIN)) {
-        vm->last_error = VM_ERR_TYPE;
-        return;
-    }
-
-    memmove(
-        &vm->stack[callable_pos],
-        &vm->stack[callable_pos + 1],
-        nargs * sizeof(Value*));
-    vm->stack_top--;
-    value_release(callable);
-
-    if (is_type) {
-        type_construct(vm, type_id, nargs);
-        return;
-    }
-
-    if (kind == FUNC_BUILTIN) {
-        builtin_invoke(vm, index, nargs);
-        return;
-    }
-
-    vm_call_user(vm, index, nargs, kwnames);
+    drop_args(args, nargs, small);
+    value_release(name);
+    value_release(self);
+    if (kwnames) value_release(kwnames);
+    push_result(vm, result);
 }
 
-static void release_args(Value **args, uint32_t nargs) {
+int vm_call_sync(VM *vm, Value *callable, Value **args, uint32_t nargs, Value **out_result) {
+    Frame *saved_frame = vm->current_frame;
+    uint8_t *saved_ip = vm->ip;
+
+    vm_push(vm, callable);
     for (uint32_t i = 0; i < nargs; i++) {
-        if (args[i]) value_release(args[i]);
-    }
-}
-
-static void call_method(VM *vm, Value *obj, const char *method_name, uint32_t nargs, Value **args) {
-    if (obj->tag == TAG_LIST && strcmp(method_name, "append") == 0) {
-        if (nargs != 1) {
-            vm->last_error = VM_ERR_TYPE;
-            release_args(args, nargs);
-            return;
-        }
-        if (value_list_append(obj, args[0]) != 0) {
-            vm->last_error = VM_ERR_OOM;
-        } else {
-            vm_push_owned(vm, value_new_int(0));
-        }
-        value_release(args[0]);
-        return;
+        vm_push(vm, args[i]);
     }
 
-    if (obj->tag == TAG_DICT && strcmp(method_name, "get") == 0) {
-        if (nargs != 1) {
-            vm->last_error = VM_ERR_TYPE;
-            release_args(args, nargs);
-            return;
-        }
-        Value *found = value_dict_get(obj, args[0]);
-        value_release(args[0]);
-        if (found) {
-            vm_push(vm, found);
-        } else {
-            vm_push_owned(vm, value_new_int(0));
-        }
-        return;
+    vm_call_value(vm, nargs, NULL);
+    if (vm->last_error != VM_ERR_OK) {
+        vm->ip = saved_ip;
+        return -1;
     }
 
-    if (obj->tag == TAG_SET && strcmp(method_name, "add") == 0) {
-        if (nargs != 1) {
-            vm->last_error = VM_ERR_TYPE;
-            release_args(args, nargs);
-            return;
+    while (vm->last_error == VM_ERR_OK && vm->current_frame != saved_frame) {
+        if (vm->ip >= vm->bytecode + vm->bytecode_len) {
+            vm->last_error = VM_ERR_BOUNDS;
+            break;
         }
-        if (value_set_add(obj, args[0]) != 0) {
-            vm->last_error = VM_ERR_OOM;
-        } else {
-            vm_push_owned(vm, value_new_int(0));
-        }
-        value_release(args[0]);
-        return;
+        vm_step(vm);
     }
 
-    vm->last_error = VM_ERR_TYPE;
-    release_args(args, nargs);
-}
+    vm->ip = saved_ip;
 
-void vm_call_method(VM *vm, uint32_t nargs) {
-    if (nargs > vm->stack_top) {
-        vm->last_error = VM_ERR_STACK;
-        return;
+    if (vm->last_error != VM_ERR_OK) {
+        return -1;
     }
 
-    Value **args = NULL;
-
-    if (nargs > 0) {
-        args = calloc(nargs, sizeof(Value*));
-        if (!args) {
-            vm->last_error = VM_ERR_OOM;
-            return;
-        }
-        for (uint32_t i = nargs; i > 0; i--) {
-            args[i - 1] = vm_pop(vm);
-            if (!args[i - 1]) {
-                vm->last_error = VM_ERR_STACK;
-                break;
-            }
-        }
-        if (vm->last_error != VM_ERR_OK) {
-            release_args(args, nargs);
-            free(args);
-            return;
-        }
-    }
-
-    Value *method_name = vm_pop(vm);
-    if (!method_name) {
-        vm->last_error = VM_ERR_STACK;
-        release_args(args, nargs);
-        free(args);
-        return;
-    }
-
-    if (method_name->tag != TAG_STRING) {
-        vm->last_error = VM_ERR_TYPE;
-        value_release(method_name);
-        release_args(args, nargs);
-        free(args);
-        return;
-    }
-
-    Value *obj = vm_pop(vm);
-    if (!obj) {
-        vm->last_error = VM_ERR_STACK;
-        value_release(method_name);
-        release_args(args, nargs);
-        free(args);
-        return;
-    }
-
-    call_method(vm, obj, method_name->data.str.data, nargs, args);
-
-    value_release(method_name);
-    value_release(obj);
-    free(args);
+    *out_result = vm_pop(vm);
+    return *out_result ? 0 : -1;
 }

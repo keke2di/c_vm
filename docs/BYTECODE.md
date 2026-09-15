@@ -56,6 +56,12 @@ Values are reference-counted by the native runtime. In the tables below, the sta
 | `STORE_GLOBAL` | `0x05` | name index | value → | Store a global |
 | `POP_TOP` | `0x06` | | value → | Discard the top value |
 | `DUP_TOP` | `0x07` | | a → a a | Duplicate the top value |
+| `DUP_TOP_TWO` | `0x0D` | | a b → a b a b | Duplicate the top two values |
+| `ROT_TWO` | `0x08` | | a b → b a | Swap the top two values |
+| `ROT_THREE` | `0x09` | | a b c → c a b | Rotate the top three values |
+| `DELETE_FAST` | `0x0A` | local slot | | `del` a local |
+| `DELETE_GLOBAL` | `0x0B` | name index | | `del` a global |
+| `DELETE_SUBSCR` | `0x0C` | | container index → | `del container[index]` |
 
 ### Arithmetic
 
@@ -64,26 +70,33 @@ Values are reference-counted by the native runtime. In the tables below, the sta
 | `BINARY_ADD` | `0x10` | a b → result | `a + b`; also joins strings |
 | `BINARY_SUB` | `0x11` | a b → result | `a - b` |
 | `BINARY_MUL` | `0x12` | a b → result | `a * b` |
-| `BINARY_DIV` | `0x13` | a b → result | `a / b`; integer division when both are integers |
+| `BINARY_DIV` | `0x13` | a b → result | `a / b`; true division, always a float |
 | `BINARY_MOD` | `0x14` | a b → result | `a % b`, with Python sign rules |
 | `BINARY_POW` | `0x15` | a b → result | `a ** b` |
 | `BINARY_FLOORDIV` | `0x16` | a b → result | `a // b` |
 | `UNARY_NEG` | `0x17` | a → result | `-a` |
-| `UNARY_NOT` | `0x18` | a → result | `not a`, producing `1` or `0` |
+| `UNARY_NOT` | `0x18` | a → result | `not a`, producing `True` or `False` |
 | `UNARY_POS` | `0x19` | a → result | `+a` |
 | `UNARY_INVERT` | `0x1A` | a → result | `~a`, integers only |
+| `BINARY_AND` | `0x1B` | a b → result | `a & b`, integers only |
+| `BINARY_OR` | `0x1C` | a b → result | `a \| b`, integers only |
+| `BINARY_XOR` | `0x1D` | a b → result | `a ^ b`, integers only |
+| `BINARY_LSHIFT` | `0x1E` | a b → result | `a << b`; rejects negative counts and detects overflow |
+| `BINARY_RSHIFT` | `0x1F` | a b → result | `a >> b`; rejects negative counts |
 
 ### Comparison and membership
 
 | Opcode | Hex | Stack | Description |
 |:-------|:----|:------|:------------|
-| `COMPARE_EQ` | `0x20` | a b → 1 or 0 | `a == b` |
-| `COMPARE_NE` | `0x21` | a b → 1 or 0 | `a != b` |
-| `COMPARE_LT` | `0x22` | a b → 1 or 0 | `a < b` |
-| `COMPARE_LE` | `0x23` | a b → 1 or 0 | `a <= b` |
-| `COMPARE_GT` | `0x24` | a b → 1 or 0 | `a > b` |
-| `COMPARE_GE` | `0x25` | a b → 1 or 0 | `a >= b` |
-| `CONTAINS` | `0x26` | item container → 1 or 0 | `item in container` |
+| `COMPARE_EQ` | `0x20` | a b → bool | `a == b`; by value, never raises |
+| `COMPARE_NE` | `0x21` | a b → bool | `a != b`; by value, never raises |
+| `COMPARE_LT` | `0x22` | a b → bool | `a < b` |
+| `COMPARE_LE` | `0x23` | a b → bool | `a <= b` |
+| `COMPARE_GT` | `0x24` | a b → bool | `a > b` |
+| `COMPARE_GE` | `0x25` | a b → bool | `a >= b` |
+| `CONTAINS` | `0x26` | item container → bool | `item in container` |
+| `COMPARE_IS` | `0x27` | a b → bool | `a is b` |
+| `COMPARE_IS_NOT` | `0x28` | a b → bool | `a is not b` |
 
 ### Control flow
 
@@ -103,6 +116,7 @@ Jump targets are byte offsets from the start of the current function's code. The
 | `RETURN` | `0x41` | | value → | Return from the current function |
 | `CALL_KW` | `0x42` | argument count | callable args names → result | Call with keyword arguments |
 | `CALL_METHOD` | `0x62` | argument count | object name args → result | Call a method; `name` is a string constant |
+| `CALL_METHOD_KW` | `0x65` | argument count | object name args kwnames → result | Call a method with keyword arguments |
 
 See [Calls](#calls-in-detail) for the argument layout and binding rules.
 
@@ -123,9 +137,20 @@ See [Calls](#calls-in-detail) for the argument layout and binding rules.
 | `GET_SLICE` | `0x5A` | | container start stop step → slice | `container[start:stop:step]`; omitted parts are `None` |
 | `GET_ITER_ITEM` | `0x5B` | | container index → item | The item at position `index`; for dicts, the key at that position |
 
+### Iteration and strings
+
+| Opcode | Hex | Operand | Stack | Description |
+|:-------|:----|:--------|:------|:------------|
+| `GET_ITER` | `0x5C` | | iterable → iterator | Make an iterator |
+| `FOR_ITER` | `0x5D` | target | iterator → iterator item | Push the next item, or jump to `target` when exhausted |
+| `UNPACK_SEQUENCE` | `0x5E` | count | iterable → itemN ... item1 | Unpack exactly `count` items |
+| `UNPACK_EX` | `0x5F` | counts | iterable → ... | Unpack with one starred target; operand packs the before/after counts |
+| `FORMAT_VALUE` | `0x63` | conversion | value spec → text | Format one f-string field |
+| `BUILD_STRING` | `0x64` | piece count | pieces → string | Concatenate f-string pieces |
+
 ### Reserved opcodes
 
-`ROT_TWO` (`0x08`), `PRINT` (`0x60`), `CALL_BUILTIN` (`0x61`), and `HALT` (`0xFF`) are listed in the opcode table but are not emitted by the compiler. The VM rejects them as invalid opcodes.
+`PRINT` (`0x60`), `CALL_BUILTIN` (`0x61`), and `HALT` (`0xFF`) are listed in the opcode table but are not emitted by the compiler. The VM rejects them as invalid opcodes.
 
 ### Compiler aliases
 
@@ -183,7 +208,8 @@ These are type errors:
 - Passing too many positional arguments
 - Passing an unknown or repeated keyword
 - Leaving a required parameter without a value
-- Passing keyword arguments to a built-in function
+
+Built-in functions, type constructors, and methods accept keyword arguments too. Method calls with keywords use `CALL_METHOD_KW`, which carries a keyword-name tuple on top of the stack like `CALL_KW`.
 
 ## Error handling
 

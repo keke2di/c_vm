@@ -6,14 +6,17 @@ cVM compiles a supported subset of Python source into CVM2 bytecode, executes th
 
 **Documentation:** <https://keke2di.github.io/c_vm/>
 
-## cVM v0.2.1
+## cVM v0.2.2
 
-v0.2.1 hardens the standalone executable and extends the type model:
+v0.2.2 is a large step toward the Python subset. Within the supported subset, output now matches CPython 3.14, including `repr`/`str` text, Unicode strings, and shortest-round-trip floats.
 
-- The packed executable loads its program from memory (no temporary file), links the C runtime statically, and imports only `KERNEL32.dll`. It runs on a clean Windows install with no Visual C++ runtime, and carries a version resource and manifest.
-- `bool` and `None` are proper types, `is` / `is not` work, and type objects are supported: `type(x)`, `type(1) is int`, `<class 'int'>`.
+- **Iteration:** a real iterator protocol, lazy `range`, `enumerate`, `zip`, `map`, `filter`, `reversed`, `iter`/`next`, and `for`/`while ... else`.
+- **Operators:** bitwise `& | ^ << >> ~`, sequence concatenation and repetition, and chained comparisons. `/` is now true division (always a float).
+- **Syntax:** conditional expressions, unpacking assignment, augmented assignment to subscripts, `del`, comprehensions with `if` and multiple `for` clauses, and f-strings.
+- **Built-ins:** `abs`, `divmod`, `pow`, `round`, `sum`, `min`, `max`, `sorted`, `any`, `all`, `isinstance`, `callable`, `id`, `ord`, `chr`, `bin`, `oct`, `hex`, `format`, `ascii`, and more, plus keyword arguments for built-ins and methods.
+- **Types:** `frozenset`, `dict` views (`keys`/`values`/`items`), container constructors from any iterable, and text codecs (`utf-8`, `utf-8-sig`, `ascii`, `latin-1`).
 
-v0.2.0 established the function model: first-class functions, keyword arguments, and default parameter values.
+The packed executable still loads from memory, links the C runtime statically, and imports only `KERNEL32.dll`.
 
 See the [changelog](https://keke2di.github.io/c_vm/CHANGELOG.html) for the full history.
 
@@ -95,30 +98,29 @@ The compiler currently supports:
 - Tuples
 - Sets
 - Dictionaries
-- Indexing
-- Slicing
-- `len()`
-- List, set, and dictionary comprehensions
+- Indexing and slicing
+- Unpacking assignment, augmented assignment, and `del`
+- Conditional expressions and f-strings
+- Iteration: `range`, `enumerate`, `zip`, `map`, `filter`, `reversed`, iterators, `for`/`while ... else`
+- Bitwise operators and chained comparisons
+- List, set, and dictionary comprehensions with `if` and multiple `for` clauses
+- Built-in functions including `len`, `abs`, `min`, `max`, `sum`, `sorted`, `round`, `pow`, `ord`, `chr`, `format`, `isinstance`
+
+It also supports iteration (`range`, `enumerate`, `zip`, `map`, `filter`, `reversed`, `for`/`while ... else`), bitwise and chained-comparison operators, conditional expressions, unpacking assignment, augmented assignment to subscripts, `del`, f-strings, and many built-in functions.
 
 Some constructs are intentionally restricted. For example:
 
-- Chained comparisons are not supported.
-- `for` loop targets must be simple names.
-- `for ... else` and `while ... else` are not supported.
-- `range()` requires integer constant arguments and a non-negative step, and only works directly in a `for` statement.
-- Comprehensions support a single generator without an `if` condition.
-- Multiple assignment targets are not supported.
 - Default parameter values must be constant expressions.
 - `*args`, `**kwargs`, keyword-only parameters, positional-only parameters, and argument unpacking are not supported.
+- Generator expressions are not supported; use a list comprehension.
 - Nested functions, closures, `lambda`, decorators, classes, exceptions, and imports are not supported.
 - Unsupported AST constructs produce compiler errors.
 
 Some supported features behave differently from Python. For example:
 
 - `True` and `False` print as `True`/`False` but are a subtype of `int` and equal `1`/`0`.
-- `/` between two integers performs integer division.
-- Comparing values other than numbers, strings, bytes, and tuples is a runtime type error, including `x == None`.
-- Lists, tuples, dicts, sets, and bytes print as summaries such as `[list len=3]`.
+- `int` is signed 64-bit; overflow is a runtime error rather than promoting to a big integer.
+- Set and `dict`-view iteration follow insertion order, not Python's hash order.
 
 The full list is in [Compatibility](https://keke2di.github.io/c_vm/COMPATIBILITY.html).
 
@@ -228,18 +230,18 @@ python tests/test_runtime_errors.py
 python tests/runtime_stress.py
 ```
 
-The v0.2.1 release passes:
+The v0.2.2 release passes:
 
 ```text
-69 example tests
-22 compiler error tests
+100 example tests
+18 compiler error tests
 14 container validation tests
-8 arithmetic error tests
-12 runtime error tests
+7 arithmetic error tests
+31 runtime error tests
 5 runtime stress tests
 5 stub tests
 
-135 passed
+180 passed
 0 failed
 ```
 
@@ -271,12 +273,14 @@ The core runtime and compiler are the focus of this repository. Studio developme
 
 ## Status
 
-**cVM v0.2.1**
+**cVM v0.2.2**
 
-- Standalone executable with no temp file and no Visual C++ runtime dependency
-- `bool`, `None`, `is`, and type objects
-- First-class functions, keyword arguments, and default parameter values
-- Nested loop, nested comprehension, and modulo fixes
+- Output matches CPython 3.14 across the supported subset: `repr`/`str`, Unicode strings, shortest-round-trip floats
+- Real iteration: `range`, `enumerate`, `zip`, `map`, `filter`, `reversed`, iterators, `for`/`while ... else`
+- Bitwise and chained-comparison operators, true division, sequence concatenation and repetition
+- Unpacking, augmented assignment to subscripts, `del`, conditional expressions, f-strings, richer comprehensions
+- Many built-in functions and keyword arguments for built-ins and methods
+- `frozenset`, dict views, container constructors from iterables, and text codecs
 - CVM2 format version 3
 - Regression and negative tests passing
 

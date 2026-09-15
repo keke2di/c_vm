@@ -21,7 +21,7 @@ The Python subset that cVM compiles and runs.
 
 ## Overview
 
-cVM uses Python's own parser, so programs are written in normal Python syntax. Only a defined subset is compiled. Anything else produces a compiler error rather than being silently misinterpreted.
+cVM uses Python's own parser, so programs are written in normal Python syntax. Only a defined subset is compiled. Anything else produces a compiler error rather than being silently misinterpreted. Within the subset, output matches CPython 3.14.
 
 {: .note }
 This page describes what you can write. The [Compatibility](COMPATIBILITY.md) page lists every feature's status and where behavior differs from Python.
@@ -33,25 +33,37 @@ This page describes what you can write. The [Compatibility](COMPATIBILITY.md) pa
 | `None` | `None` |
 | Integers (signed 64-bit) | `42`, `-7` |
 | Floats | `3.14` |
-| Strings | `"cVM"` |
+| Strings (Unicode) | `"café"` |
 | Bytes | `b"abc"` |
 | Lists | `[1, 2, 3]` |
 | Tuples | `(1, 2)` |
 | Dictionaries | `{"a": 1}` |
-| Sets | `{1, 2}` |
+| Sets, frozensets | `{1, 2}`, `frozenset({1})` |
+| Ranges | `range(0, 10, 2)` |
 | Functions | `print`, `add` |
 
 `True` and `False` print as `True`/`False` but are a subtype of `int`: they equal `1` and `0` and behave as integers in arithmetic and as dict keys.
 
-## Variables
+## Variables and assignment
 
 ```python
 x = 10
 name = "cVM"
 items[0] = x
+
+a, b = 1, 2
+first, *rest = [1, 2, 3]
+a = b = 0
 ```
 
-Module-level assignments create globals. Assignments inside a function create locals. Only one assignment target is allowed per statement.
+Module-level assignments create globals. Assignments inside a function create locals. Targets may be a single name, a subscript, or a tuple/list to unpack (with at most one starred target).
+
+`del` removes a name or a subscript:
+
+```python
+del x
+del d["key"]
+```
 
 ## Functions
 
@@ -77,13 +89,7 @@ greet("Ada", "?")
 greet(punctuation=".", name="Ada")
 ```
 
-Arguments are bound in this order:
-
-1. Positional arguments fill the leading parameters.
-2. Keyword arguments fill parameters by name.
-3. Remaining parameters take their default values.
-
-Too many arguments, an unknown keyword, the same parameter given twice, or a parameter left without a value is a runtime type error.
+Arguments are bound positional first, then by keyword, then from defaults. Too many arguments, an unknown keyword, a repeated parameter, or a parameter left without a value is a runtime type error. Keyword arguments also work for built-in functions and methods, such as `print(1, 2, sep=", ", end="")`.
 
 {: .important }
 Default values must be constant expressions: numbers, strings, bytes, `None`, `True`, `False`, and tuples of these. They are fixed when the program is compiled.
@@ -111,7 +117,6 @@ Calling a value that is not a function is a runtime type error. A top-level `def
 - Decorators
 - `*args`, `**kwargs`, keyword-only and positional-only parameters
 - Argument unpacking with `*` or `**`
-- Keyword arguments to built-in functions and methods
 - The `global` and `nonlocal` statements
 
 ## Control flow
@@ -125,6 +130,8 @@ elif x > 5:
     print(5)
 else:
     print(0)
+
+label = "big" if x > 10 else "small"
 ```
 
 ### Loops
@@ -139,28 +146,39 @@ for row in rows:
 
 for i in range(0, 10, 2):
     print(i)
+
+for key, value in pairs:
+    print(key, value)
+
+for item in items:
+    if item == target:
+        break
+else:
+    print("not found")
 ```
 
-- `for` iterates lists, tuples, strings, bytes, and dictionary keys.
-- `range()` takes one to three integer constants with a non-negative step.
-- `break`, `continue`, and `pass` are supported.
-- `for ... else` and `while ... else` are not supported.
+- `for` iterates any iterable: lists, tuples, strings, bytes, dicts, sets, ranges, and the lazy iterators returned by `enumerate`, `zip`, `map`, `filter`, and `reversed`.
+- The loop target may be a name or a tuple/list to unpack.
+- `range()` takes one to three integer arguments and supports negative steps.
+- `break`, `continue`, and `pass` are supported, as are `for ... else` and `while ... else`.
 
 ## Operators
 
 | Kind | Operators |
 |:-----|:----------|
 | Arithmetic | `+` `-` `*` `/` `//` `%` `**` |
+| Bitwise | `&` `\|` `^` `<<` `>>` `~` |
 | Comparison | `==` `!=` `<` `<=` `>` `>=` |
 | Membership | `in` `not in` |
+| Identity | `is` `is not` |
 | Boolean | `and` `or` `not` |
 | Unary | `+` `-` `~` |
-| Augmented assignment | `+=` `-=` `*=` `/=` `//=` `%=` `**=` |
+| Augmented assignment | `+=` `-=` `*=` `/=` `//=` `%=` `**=` `&=` `\|=` `^=` `<<=` `>>=` |
 
-- `/` between two integers performs truncating integer division.
-- `//` and `%` follow Python's sign rules.
-- Comparisons work on numbers, strings, and bytes, and `==` / `!=` also work on tuples. Comparing other values, including `None`, is a runtime type error.
-- Chained comparisons such as `a < b < c` are not supported.
+- `/` is true division and always returns a `float`; use `//` for floor division.
+- `+` and `*` also concatenate and repeat `list`, `tuple`, `str`, and `bytes`.
+- `==` and `!=` compare by value across all types and never raise. Ordering works on numbers, strings, bytes, lists, and tuples; comparing mismatched types raises.
+- Chained comparisons such as `a < b < c` are supported.
 
 ## Collections
 
@@ -177,7 +195,13 @@ ages["ada"]
 items[1:3]
 items[::2]
 "abc"[::-1]
+
+ages["linus"] = 30
+del ages["ada"]
+"ada" in ages
 ```
+
+Dict keys may be any hashable value. `dict.keys()`, `dict.values()`, and `dict.items()` return live views.
 
 ## Comprehensions
 
@@ -185,40 +209,50 @@ items[::2]
 [x * 2 for x in values]
 {x * 2 for x in values}
 {x: x * 2 for x in values}
+[x for row in grid for x in row if x > 0]
 ```
 
-Comprehensions take a single `for` clause without an `if` clause, and can be nested.
+Comprehensions support multiple `for` clauses, `if` filters, and tuple targets, and can be nested. Generator expressions are not supported; use a list comprehension.
+
+## f-strings
+
+```python
+name = "Ada"
+score = 91.5
+print(f"{name}: {score:.1f}")
+print(f"{255:#x} {1000000:,} {name!r}")
+```
+
+f-strings support the full format-spec mini-language (fill, alignment, sign, `#`, `0`, width, grouping, precision, and type) and the `!r`, `!s`, and `!a` conversions.
 
 ## Built-ins and methods
 
 | Built-in | Purpose |
 |:---------|:--------|
-| `print(*values)` | Print values separated by spaces |
-| `len(x)` | Length of a string, bytes, list, tuple, dict, or set |
-| `int(x)` | Convert to an integer |
-| `float(x)` | Convert to a float |
-| `str(x)` | Convert to a string |
-| `list(*items)` | Build a list from the arguments |
-| `enumerate(items)` | List of `[index, item]` pairs |
-| `append(items, value)` | Append to a list |
+| `print`, `len`, `repr`, `ascii`, `format` | Output and text conversion |
+| `int`, `float`, `str`, `bool`, `bytes` | Scalar conversions |
+| `list`, `tuple`, `set`, `frozenset`, `dict`, `range`, `type` | Containers and types |
+| `abs`, `divmod`, `pow`, `round` | Numeric |
+| `sum`, `min`, `max`, `sorted`, `any`, `all` | Aggregates over iterables |
+| `enumerate`, `zip`, `map`, `filter`, `reversed`, `iter`, `next` | Iteration |
+| `isinstance`, `callable`, `id`, `ord`, `chr`, `bin`, `oct`, `hex` | Inspection and conversion |
 
 | Method | Purpose |
 |:-------|:--------|
 | `list.append(value)` | Append to a list |
-| `dict.get(key)` | Look up a key |
+| `dict.get(key[, default])` | Look up a key |
+| `dict.keys()`, `dict.values()`, `dict.items()` | Live views |
 | `set.add(value)` | Add to a set |
+| `str.encode(...)`, `bytes.decode(...)` | Encode and decode text |
 
-`len()` compiles to a single instruction unless `len` is a parameter or local variable, or the module defines its own `def len`.
+`len()` compiles to a single instruction unless `len` is used as a value or the name `len` is bound in the program.
 
 ## Output
 
-`print` separates its arguments with spaces. Numbers, strings, and `None` print as you would expect.
-
-{: .note }
-Lists, tuples, dicts, sets, and bytes print as summaries such as `[list len=3]`, and floats print with up to 6 significant digits. See [Printing](COMPATIBILITY.md#printing-and-string-conversion).
+`print` and `str` produce CPython's text: real `repr` for containers, Unicode strings, and shortest-round-trip floats. See [Printing](COMPATIBILITY.md#printing-and-string-conversion).
 
 ## Errors
 
 The compiler reports unsupported syntax and invalid constructs as `compile error: ...`.
 
-At runtime, the VM stops with `VM run error: <kind>` for type errors, argument binding errors, division by zero, integer overflow, stack errors, and invalid bytecode. There is no exception handling.
+At runtime, the VM stops with `VM run error: <kind>` for type errors, value errors, missing keys, out-of-range indexes, division by zero, integer overflow, and other conditions. There is no exception handling. The full list of error kinds is in [Compatibility](COMPATIBILITY.md#runtime-limits-and-errors).

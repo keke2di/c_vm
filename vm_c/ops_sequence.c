@@ -6,6 +6,91 @@ static int int_like(const Value *v) {
     return v->tag == TAG_INT || v->tag == TAG_BOOL;
 }
 
+int64_t value_length(const Value *v) {
+    if (!v) return -1;
+
+    switch (v->tag) {
+        case TAG_STRING: return (int64_t)utf8_length(v->data.str.data, v->data.str.len);
+        case TAG_BYTES: return v->data.bytes.len;
+        case TAG_LIST: return v->data.list.len;
+        case TAG_TUPLE: return v->data.tuple.len;
+        case TAG_DICT: return v->data.dict.len;
+        case TAG_SET:
+        case TAG_FROZENSET: return v->data.set.len;
+        case TAG_DICT_VIEW: return v->data.view.dict->data.dict.len;
+        case TAG_RANGE:
+            return value_range_len(
+                v->data.range.start,
+                v->data.range.stop,
+                v->data.range.step);
+        default: return -1;
+    }
+}
+
+Value *value_item_at(const Value *v, int64_t idx) {
+    if (!v || idx < 0) return NULL;
+
+    switch (v->tag) {
+        case TAG_LIST: {
+            Value *item = value_list_get(v, (size_t)idx);
+            return item ? value_retain(item) : NULL;
+        }
+
+        case TAG_TUPLE: {
+            Value *item = value_tuple_get(v, (size_t)idx);
+            return item ? value_retain(item) : NULL;
+        }
+
+        case TAG_SET:
+        case TAG_FROZENSET:
+            if ((uint64_t)idx >= v->data.set.len) return NULL;
+            return value_retain(v->data.set.items[idx]);
+
+        case TAG_DICT_VIEW: {
+            const Value *dict = v->data.view.dict;
+            if ((uint64_t)idx >= dict->data.dict.len) return NULL;
+            const DictEntry *entry = &dict->data.dict.entries[idx];
+            if (v->data.view.kind == VIEW_KEYS) return value_retain(entry->key);
+            if (v->data.view.kind == VIEW_VALUES) return value_retain(entry->value);
+            Value *pair = value_new_tuple(2);
+            if (!pair) return NULL;
+            pair->data.tuple.items[0] = value_retain(entry->key);
+            pair->data.tuple.items[1] = value_retain(entry->value);
+            return pair;
+        }
+
+        case TAG_DICT: {
+            Value *key = value_dict_key_at(v, (size_t)idx);
+            return key ? value_retain(key) : NULL;
+        }
+
+        case TAG_STRING: {
+            const char *text = v->data.str.data;
+            size_t byte_len = v->data.str.len;
+            if ((uint64_t)idx >= utf8_length(text, byte_len)) return NULL;
+            size_t offset = utf8_offset(text, byte_len, (size_t)idx);
+            size_t size = utf8_char_size(text, byte_len, offset);
+            return value_new_string_len(text + offset, size);
+        }
+
+        case TAG_BYTES:
+            if ((uint64_t)idx >= v->data.bytes.len) return NULL;
+            return value_new_int(v->data.bytes.data[idx]);
+
+        case TAG_RANGE: {
+            int64_t len = value_range_len(
+                v->data.range.start,
+                v->data.range.stop,
+                v->data.range.step);
+            if (idx >= len) return NULL;
+            return value_new_int(v->data.range.start + idx * v->data.range.step);
+        }
+
+        default:
+            return NULL;
+    }
+}
+
 static void release_stack_range(VM *vm, uint32_t start, uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {
         if (vm->stack[start + i]) {
@@ -90,10 +175,11 @@ void op_build_map(VM *vm, uint32_t count) {
         Value *key = vm->stack[start + 2 * i];
         Value *value = vm->stack[start + 2 * i + 1];
 
-        if (value_dict_set(dict, key, value) != 0) {
+        int rc = value_dict_set(dict, key, value);
+        if (rc != 0) {
             release_stack_range(vm, start, total);
             value_release(dict);
-            vm->last_error = VM_ERR_OOM;
+            vm->last_error = insert_error(rc);
             return;
         }
 
@@ -124,10 +210,11 @@ void op_build_set(VM *vm, uint32_t count) {
     for (uint32_t i = 0; i < count; i++) {
         Value *item = vm->stack[start + i];
 
-        if (value_set_add(set, item) != 0) {
+        int rc = value_set_add(set, item);
+        if (rc != 0) {
             release_stack_range(vm, start, count);
             value_release(set);
-            vm->last_error = VM_ERR_OOM;
+            vm->last_error = insert_error(rc);
             return;
         }
 
@@ -169,8 +256,9 @@ void op_set_add(VM *vm) {
 
     if (set->tag != TAG_SET) {
         vm->last_error = VM_ERR_TYPE;
-    } else if (value_set_add(set, value) != 0) {
-        vm->last_error = VM_ERR_OOM;
+    } else {
+        int rc = value_set_add(set, value);
+        if (rc != 0) vm->last_error = insert_error(rc);
     }
 
     value_release(value);
@@ -189,8 +277,9 @@ void op_map_add(VM *vm) {
 
     if (dict->tag != TAG_DICT) {
         vm->last_error = VM_ERR_TYPE;
-    } else if (value_dict_set(dict, key, value) != 0) {
-        vm->last_error = VM_ERR_OOM;
+    } else {
+        int rc = value_dict_set(dict, key, value);
+        if (rc != 0) vm->last_error = insert_error(rc);
     }
 
     value_release(value);
@@ -215,11 +304,15 @@ void op_get_index(VM *vm) {
     }
 
     if (container->tag == TAG_DICT) {
-        Value *found = value_dict_get(container, idx_val);
-        if (found) {
-            vm_push(vm, found);
+        if (!value_is_hashable(idx_val)) {
+            vm->last_error = VM_ERR_TYPE;
         } else {
-            vm_push_owned(vm, value_new_int(0));
+            Value *found = value_dict_get(container, idx_val);
+            if (found) {
+                vm_push(vm, found);
+            } else {
+                vm->last_error = VM_ERR_KEY;
+            }
         }
     } else if (!int_like(idx_val)) {
         vm->last_error = VM_ERR_TYPE;
@@ -251,13 +344,33 @@ void op_get_index(VM *vm) {
                 }
                 break;
 
-            case TAG_STRING:
-                if (!normalize_index(&idx, container->data.str.len)) {
+            case TAG_STRING: {
+                const char *text = container->data.str.data;
+                size_t byte_len = container->data.str.len;
+
+                if (!normalize_index(&idx, (int64_t)utf8_length(text, byte_len))) {
                     vm->last_error = VM_ERR_BOUNDS;
                 } else {
-                    vm_push_owned(vm, value_new_string_len(container->data.str.data + idx, 1));
+                    size_t offset = utf8_offset(text, byte_len, (size_t)idx);
+                    size_t size = utf8_char_size(text, byte_len, offset);
+                    vm_push_owned(vm, value_new_string_len(text + offset, size));
                 }
                 break;
+            }
+
+            case TAG_RANGE: {
+                int64_t len = value_range_len(
+                    container->data.range.start,
+                    container->data.range.stop,
+                    container->data.range.step);
+                if (!normalize_index(&idx, len)) {
+                    vm->last_error = VM_ERR_BOUNDS;
+                } else {
+                    vm_push_owned(vm, value_new_int(
+                        container->data.range.start + idx * container->data.range.step));
+                }
+                break;
+            }
 
             default:
                 vm->last_error = VM_ERR_TYPE;
@@ -285,56 +398,18 @@ void op_get_iter_item(VM *vm) {
     } else if (idx_val->data.int_val < 0) {
         vm->last_error = VM_ERR_BOUNDS;
     } else {
-        size_t idx = (size_t)idx_val->data.int_val;
-        Value *item = NULL;
-
-        switch (container->tag) {
-            case TAG_DICT:
-                item = value_dict_key_at(container, idx);
-                if (!item) {
-                    vm->last_error = VM_ERR_BOUNDS;
-                } else {
-                    vm_push(vm, item);
-                }
-                break;
-
-            case TAG_LIST:
-                item = value_list_get(container, idx);
-                if (!item) {
-                    vm->last_error = VM_ERR_BOUNDS;
-                } else {
-                    vm_push(vm, item);
-                }
-                break;
-
-            case TAG_TUPLE:
-                item = value_tuple_get(container, idx);
-                if (!item) {
-                    vm->last_error = VM_ERR_BOUNDS;
-                } else {
-                    vm_push(vm, item);
-                }
-                break;
-
-            case TAG_STRING:
-                if (idx >= container->data.str.len) {
-                    vm->last_error = VM_ERR_BOUNDS;
-                } else {
-                    vm_push_owned(vm, value_new_string_len(container->data.str.data + idx, 1));
-                }
-                break;
-
-            case TAG_BYTES:
-                if (idx >= container->data.bytes.len) {
-                    vm->last_error = VM_ERR_BOUNDS;
-                } else {
-                    vm_push_owned(vm, value_new_int(container->data.bytes.data[idx]));
-                }
-                break;
-
-            default:
-                vm->last_error = VM_ERR_TYPE;
-                break;
+        int64_t len = value_length(container);
+        if (len < 0) {
+            vm->last_error = VM_ERR_TYPE;
+        } else if (idx_val->data.int_val >= len) {
+            vm->last_error = VM_ERR_BOUNDS;
+        } else {
+            Value *item = value_item_at(container, idx_val->data.int_val);
+            if (!item) {
+                vm->last_error = VM_ERR_BOUNDS;
+            } else {
+                vm_push_owned(vm, item);
+            }
         }
     }
 
@@ -420,7 +495,7 @@ void op_get_slice(VM *vm) {
         switch (container->tag) {
             case TAG_LIST: len = container->data.list.len; break;
             case TAG_TUPLE: len = container->data.tuple.len; break;
-            case TAG_STRING: len = container->data.str.len; break;
+            case TAG_STRING: len = (int64_t)utf8_length(container->data.str.data, container->data.str.len); break;
             default: len = container->data.bytes.len; break;
         }
 
@@ -443,21 +518,46 @@ void op_get_slice(VM *vm) {
             for (int64_t k = 0; result && k < count; k++) {
                 result->data.tuple.items[k] = value_retain(container->data.tuple.items[start + k * step]);
             }
-        } else {
-            const char *source = container->tag == TAG_STRING
-                ? container->data.str.data
-                : (const char *)container->data.bytes.data;
+        } else if (container->tag == TAG_BYTES) {
+            const unsigned char *source = container->data.bytes.data;
             char *buffer = malloc((size_t)count + 1);
             if (buffer) {
                 for (int64_t k = 0; k < count; k++) {
-                    buffer[k] = source[start + k * step];
+                    buffer[k] = (char)source[start + k * step];
                 }
-                buffer[count] = '\0';
-                result = container->tag == TAG_STRING
-                    ? value_new_string_len(buffer, (size_t)count)
-                    : value_new_bytes((const unsigned char *)buffer, (size_t)count);
+                result = value_new_bytes((const unsigned char *)buffer, (size_t)count);
                 free(buffer);
             }
+        } else {
+            const char *source = container->data.str.data;
+            size_t byte_len = container->data.str.len;
+            size_t *offsets = malloc(((size_t)len + 1) * sizeof(size_t));
+            char *buffer = malloc(byte_len + 1);
+
+            if (offsets && buffer) {
+                size_t offset = 0;
+
+                for (int64_t i = 0; i < len; i++) {
+                    offsets[i] = offset;
+                    offset += utf8_char_size(source, byte_len, offset);
+                }
+                offsets[len] = byte_len;
+
+                size_t out = 0;
+
+                for (int64_t k = 0; k < count; k++) {
+                    int64_t index = start + k * step;
+                    size_t begin = offsets[index];
+                    size_t size = offsets[index + 1] - begin;
+                    memcpy(buffer + out, source + begin, size);
+                    out += size;
+                }
+
+                result = value_new_string_len(buffer, out);
+            }
+
+            free(offsets);
+            free(buffer);
         }
 
         vm_push_owned(vm, result);
@@ -489,10 +589,9 @@ void op_set_index(VM *vm) {
         } else {
             value_list_set(container, (size_t)idx, val);
         }
-    } else if (container->tag == TAG_DICT && idx_val->tag == TAG_STRING) {
-        if (value_dict_set(container, idx_val, val) != 0) {
-            vm->last_error = VM_ERR_OOM;
-        }
+    } else if (container->tag == TAG_DICT) {
+        int rc = value_dict_set(container, idx_val, val);
+        if (rc != 0) vm->last_error = insert_error(rc);
     } else {
         vm->last_error = VM_ERR_TYPE;
     }
@@ -506,21 +605,50 @@ void op_len(VM *vm) {
     Value *v = vm_pop(vm);
     if (!v) return;
 
-    int64_t len_val = -1;
+    int64_t len_val = value_length(v);
 
-    switch (v->tag) {
-        case TAG_STRING: len_val = v->data.str.len; break;
-        case TAG_BYTES: len_val = v->data.bytes.len; break;
-        case TAG_LIST: len_val = v->data.list.len; break;
-        case TAG_TUPLE: len_val = v->data.tuple.len; break;
-        case TAG_DICT: len_val = v->data.dict.len; break;
-        case TAG_SET: len_val = v->data.set.len; break;
-        default: vm->last_error = VM_ERR_TYPE; break;
-    }
-
-    if (vm->last_error == VM_ERR_OK) {
+    if (len_val < 0) {
+        vm->last_error = VM_ERR_TYPE;
+    } else {
         vm_push_owned(vm, value_new_int(len_val));
     }
 
     value_release(v);
+}
+
+void op_delete_index(VM *vm) {
+    Value *idx = vm_pop(vm);
+    Value *container = vm_pop(vm);
+
+    if (!idx || !container) {
+        if (idx) value_release(idx);
+        if (container) value_release(container);
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    if (container->tag == TAG_LIST && int_like(idx)) {
+        int64_t i = idx->data.int_val;
+        if (!normalize_index(&i, container->data.list.len)) {
+            vm->last_error = VM_ERR_BOUNDS;
+        } else {
+            Value **items = container->data.list.items;
+            Value *removed = items[i];
+            memmove(&items[i], &items[i + 1],
+                    (container->data.list.len - (size_t)i - 1) * sizeof(Value *));
+            container->data.list.len--;
+            value_release(removed);
+        }
+    } else if (container->tag == TAG_DICT) {
+        if (!value_is_hashable(idx)) {
+            vm->last_error = VM_ERR_TYPE;
+        } else if (!value_dict_delete(container, idx)) {
+            vm->last_error = VM_ERR_KEY;
+        }
+    } else {
+        vm->last_error = VM_ERR_TYPE;
+    }
+
+    value_release(idx);
+    value_release(container);
 }

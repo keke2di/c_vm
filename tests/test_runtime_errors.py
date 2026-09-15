@@ -102,9 +102,9 @@ f(1, 2, 3)
         "Type error",
         "",
     ),
-    "keyword_to_builtin": (
+    "unknown_builtin_keyword": (
         """
-print(1, end="")
+print(1, foo=2)
 """,
         "Type error",
         "",
@@ -115,6 +115,151 @@ x = 5
 x(a=1)
 """,
         "Type error",
+        "",
+    ),
+    "missing_dict_key": (
+        """
+d = {"a": 1}
+print(d["a"])
+d["b"]
+""",
+        "Key error",
+        "1\n",
+    ),
+    "delete_missing_dict_key": (
+        """
+d = {}
+del d["x"]
+""",
+        "Key error",
+        "",
+    ),
+    "unhashable_dict_key": (
+        """
+d = {}
+d[[1]] = 2
+""",
+        "Type error",
+        "",
+    ),
+    "unhashable_set_item": (
+        """
+s = {1}
+s.add({})
+""",
+        "Type error",
+        "",
+    ),
+    "unhashable_membership": (
+        """
+print([1] in [[1]])
+[1] in {1: 2}
+""",
+        "Type error",
+        "True\n",
+    ),
+    "unknown_method": (
+        """
+x = [1]
+x.nope()
+""",
+        "Attribute error",
+        "",
+    ),
+    "method_keyword_rejected": (
+        """
+x = []
+x.append(item=1)
+""",
+        "Type error",
+        "",
+    ),
+    "invalid_int_literal": (
+        """
+print(int("12"))
+int("12a")
+""",
+        "Value error",
+        "12\n",
+    ),
+    "float_to_int_overflow": (
+        """
+int(float("inf"))
+""",
+        "Integer overflow",
+        "",
+    ),
+    "dict_changed_during_iteration": (
+        """
+d = {"a": 1}
+for k in d:
+    d["b"] = 2
+""",
+        "Runtime error",
+        "",
+    ),
+    "unknown_encoding": (
+        """
+"x".encode("bogus")
+""",
+        "Lookup error",
+        "",
+    ),
+    "unknown_error_handler_used": (
+        """
+print("x".encode("ascii", "bogus"))
+"\\u00e9".encode("ascii", "bogus")
+""",
+        "Lookup error",
+        "b'x'\n",
+    ),
+    "invalid_utf8": (
+        """
+b"\\xff".decode()
+""",
+        "Unicode error",
+        "",
+    ),
+    "decode_with_xmlcharrefreplace": (
+        """
+b"\\xff".decode("utf-8", "xmlcharrefreplace")
+""",
+        "Type error",
+        "",
+    ),
+    "bytes_from_str_without_encoding": (
+        """
+bytes("x")
+""",
+        "Type error",
+        "",
+    ),
+    "bytes_item_out_of_range": (
+        """
+bytes([1, 256])
+""",
+        "Value error",
+        "",
+    ),
+    "decode_str": (
+        """
+str("x", "utf-8")
+""",
+        "Type error",
+        "",
+    ),
+    "unhashable_dict_view": (
+        """
+{{}.keys(): 1}
+""",
+        "Type error",
+        "",
+    ),
+    "frozenset_has_no_add": (
+        """
+frozenset().add(1)
+""",
+        "Attribute error",
         "",
     ),
 }

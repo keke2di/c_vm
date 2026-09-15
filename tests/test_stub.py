@@ -1,3 +1,4 @@
+import os
 import struct
 import subprocess
 import sys
@@ -9,6 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 COMPILER = "compiler.cli"
 PACKER = "packer.pack"
 STUB = ROOT / "vm_c" / "stub.exe"
+ENV = {**os.environ, "PYTHONUTF8": "1"}
 
 PROGRAM = """
 def greet(name, punctuation="!"):
@@ -19,7 +21,16 @@ print(greet("cVM"))
 
 
 def run(command):
-    return subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=120)
+    return subprocess.run(
+        command,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=ENV,
+        timeout=120,
+    )
 
 
 def read_imports(data):

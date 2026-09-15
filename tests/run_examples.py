@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +11,7 @@ STUB = ROOT / "vm_c" / "stub.exe"
 EXAMPLES = ROOT / "examples"
 OUTPUT = ROOT / "output"
 TIMEOUT = 120
+ENV = {**os.environ, "PYTHONUTF8": "1"}
 
 
 KNOWN_DIFFERENCES = {
@@ -17,16 +19,9 @@ KNOWN_DIFFERENCES = {
         "7\n-1\n5\n42\ntruthy\n<function add>\n<built-in function print>\n",
         "function repr has no address",
     ),
-    "test_enumerate.py": (
-        "[list len=2]\n[list len=2]\n[list len=2]\n0\n",
-        "enumerate yields lists and collections print as summaries",
-    ),
-    "test_enumerate_simple.py": ("[list len=3]\n", "enumerate returns a list"),
-    "test_float.py": ("5.14\n", "floats print with %g instead of the shortest repr"),
-    "test_list_index.py": ("20\n", "list(*items) builds a list from its arguments"),
-    "test_slice.py": (
-        "[list len=3]\n[list len=3]\n[list len=4]\n[list len=6]\n[list len=2]\n[list len=6]\n",
-        "collections print as summaries",
+    "test_enumerate_simple.py": (
+        "<iterator object>\n",
+        "iterator repr is generic and has no address",
     ),
 }
 
@@ -37,6 +32,9 @@ def run(command, cwd=ROOT):
         cwd=cwd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=ENV,
         timeout=TIMEOUT,
     )
 

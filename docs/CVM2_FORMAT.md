@@ -154,4 +154,7 @@ The runtime accepts only the format version it was built for.
 | 2 | v0.1.0 | First public format |
 | 3 | v0.2.0 | Function records carry a default count, parameter names, and default values |
 
-Modules compiled by an older compiler must be recompiled. Packed executables are not affected, because each one carries the runtime it was built with.
+The container format has stayed at version 3 since v0.2.0. Later releases have added instructions and runtime types without changing the container layout or the serialized constant tags, so the loader still accepts format version 3.
+
+{: .note }
+The instruction set does change between releases. A `.cvm` module runs only on a matching runtime, so recompile modules after upgrading. Packed executables are not affected, because each one carries the runtime it was built with.
