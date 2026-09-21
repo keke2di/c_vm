@@ -135,6 +135,13 @@ See [Calls](#calls-in-detail) for the argument layout and binding rules.
 | `SET_ADD` | `0x58` | | set value → | Add to a set |
 | `MAP_ADD` | `0x59` | | dict key value → | Set a dict entry |
 | `GET_SLICE` | `0x5A` | | container start stop step → slice | `container[start:stop:step]`; omitted parts are `None` |
+| `STORE_SLICE` | `0x66` | | value container start stop step → | `container[start:stop:step] = value`; the value is on the stack below the container |
+| `DELETE_SLICE` | `0x67` | | container start stop step → | `del container[start:stop:step]` |
+| `LOAD_DEREF` | `0x68` | cell index | → value | Read a cell or free variable |
+| `STORE_DEREF` | `0x69` | cell index | value → | Write a cell or free variable |
+| `DELETE_DEREF` | `0x6A` | cell index | → | Empty a cell, so the next read raises |
+| `LOAD_CLOSURE` | `0x6B` | cell index | → cell | Push the cell itself, to build a closure |
+| `MAKE_FUNCTION` | `0x6C` | function index | defaults kwdefaults closure → function | Build a function value; `defaults` is a tuple, `kwdefaults` a dict, `closure` a tuple of cells whose length must equal the record's free-variable count |
 | `GET_ITER_ITEM` | `0x5B` | | container index → item | The item at position `index`; for dicts, the key at that position |
 
 ### Iteration and strings
@@ -147,6 +154,15 @@ See [Calls](#calls-in-detail) for the argument layout and binding rules.
 | `UNPACK_EX` | `0x5F` | counts | iterable → ... | Unpack with one starred target; operand packs the before/after counts |
 | `FORMAT_VALUE` | `0x63` | conversion | value spec → text | Format one f-string field |
 | `BUILD_STRING` | `0x64` | piece count | pieces → string | Concatenate f-string pieces |
+| `CALL_EX` | `0x6D` | | callable args kwargs → result | Call with unpacked arguments; `args` is a list or tuple, `kwargs` a dict or `None` |
+| `LIST_EXTEND` | `0x6E` | | list iterable → | Extend a list from any iterable |
+| `DICT_MERGE` | `0x6F` | | dict other → | Merge a dict, rejecting a key that already exists (this is how `**` in a call detects duplicates) |
+| `SETUP_HANDLER` | `0x70` | target | → | Push a handler: the operand is the code offset to jump to when an exception reaches this frame, together with the current stack depth |
+| `POP_HANDLER` | `0x71` | | → | Pop the innermost handler (leaving the protected region normally) |
+| `EXCEPT_MATCH` | `0x72` | | exception types → exception bool | Test an exception against a type or tuple of types, leaving the exception on the stack |
+| `EXCEPT_CLEAR` | `0x73` | | exception → | Drop the handled exception and clear the VM's current-exception state |
+| `RERAISE` | `0x74` | | [exception] → | Re-raise the exception on the stack, or the active one |
+| `RAISE_VARARGS` | `0x75` | 0 or 1 | [value] → | `0` re-raises the active exception; `1` raises the value on the stack (an instance, or a class that is instantiated with no arguments) |
 
 ### Reserved opcodes
 

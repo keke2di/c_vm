@@ -137,9 +137,21 @@ typedef struct {
     uint32_t name_idx;
     uint16_t num_locals;
     uint16_t num_params;
+    uint16_t posonly_count;
     uint16_t num_defaults;
+    uint16_t num_kwonly;
+    uint16_t vararg_slot;
+    uint16_t kwarg_slot;
+    uint16_t num_cells;
+    uint16_t num_free;
     size_t param_names_pos;
-    size_t defaults_pos;
+    size_t kwonly_names_pos;
+    size_t kwonly_slots_pos;
+    size_t kwonly_flags_pos;
+    size_t cell_slots_pos;
+    size_t free_names_pos;
+    size_t lines_pos;
+    uint32_t line_count;
     uint32_t code_len;
     size_t code_pos;
 } FunctionRecord;
@@ -153,7 +165,7 @@ static int parse_function_record(
 ) {
     size_t p = *pos;
 
-    if (p > end || end - p < 4 + 2 + 2 + 2) {
+    if (p > end || end - p < 4 + 2 * 10) {
         return VM_ERR_BOUNDS;
     }
 
@@ -166,18 +178,45 @@ static int parse_function_record(
     memcpy(&rec->num_params, data + p, 2);
     p += 2;
 
+    memcpy(&rec->posonly_count, data + p, 2);
+    p += 2;
+
     memcpy(&rec->num_defaults, data + p, 2);
+    p += 2;
+
+    memcpy(&rec->num_kwonly, data + p, 2);
+    p += 2;
+
+    memcpy(&rec->vararg_slot, data + p, 2);
+    p += 2;
+
+    memcpy(&rec->kwarg_slot, data + p, 2);
+    p += 2;
+
+    memcpy(&rec->num_cells, data + p, 2);
+    p += 2;
+
+    memcpy(&rec->num_free, data + p, 2);
     p += 2;
 
     if (
         rec->name_idx >= vm->num_names ||
         rec->num_params > rec->num_locals ||
-        rec->num_defaults > rec->num_params
+        rec->num_defaults > rec->num_params ||
+        rec->posonly_count > rec->num_params ||
+        (rec->vararg_slot != UINT16_MAX && rec->vararg_slot >= rec->num_locals) ||
+        (rec->kwarg_slot != UINT16_MAX && rec->kwarg_slot >= rec->num_locals)
     ) {
         return VM_ERR_BOUNDS;
     }
 
-    size_t tables_len = ((size_t)rec->num_params + rec->num_defaults) * 4;
+    size_t tables_len =
+        (size_t)rec->num_params * 4 +
+        (size_t)rec->num_kwonly * 4 +
+        (size_t)rec->num_kwonly * 2 +
+        (size_t)rec->num_kwonly +
+        (size_t)rec->num_cells * 2 +
+        (size_t)rec->num_free * 4;
 
     if (end - p < tables_len + 4) {
         return VM_ERR_BOUNDS;
@@ -195,17 +234,74 @@ static int parse_function_record(
         }
     }
 
-    rec->defaults_pos = p;
+    rec->kwonly_names_pos = p;
 
-    for (uint32_t i = 0; i < rec->num_defaults; i++) {
-        uint32_t const_idx;
-        memcpy(&const_idx, data + p, 4);
+    for (uint32_t i = 0; i < rec->num_kwonly; i++) {
+        uint32_t name_idx;
+        memcpy(&name_idx, data + p, 4);
         p += 4;
 
-        if (const_idx >= vm->num_constants) {
+        if (name_idx >= vm->num_names) {
             return VM_ERR_BOUNDS;
         }
     }
+
+    rec->kwonly_slots_pos = p;
+
+    for (uint32_t i = 0; i < rec->num_kwonly; i++) {
+        uint16_t slot;
+        memcpy(&slot, data + p, 2);
+        p += 2;
+
+        if (slot >= rec->num_locals) {
+            return VM_ERR_BOUNDS;
+        }
+    }
+
+    rec->kwonly_flags_pos = p;
+    p += rec->num_kwonly;
+
+    rec->cell_slots_pos = p;
+
+    for (uint32_t i = 0; i < rec->num_cells; i++) {
+        uint16_t slot;
+        memcpy(&slot, data + p, 2);
+        p += 2;
+
+        if (slot >= rec->num_locals) {
+            return VM_ERR_BOUNDS;
+        }
+    }
+
+    rec->free_names_pos = p;
+
+    for (uint32_t i = 0; i < rec->num_free; i++) {
+        uint32_t name_idx;
+        memcpy(&name_idx, data + p, 4);
+        p += 4;
+
+        if (name_idx >= vm->num_names) {
+            return VM_ERR_BOUNDS;
+        }
+    }
+
+    if (end - p < 4) {
+        return VM_ERR_BOUNDS;
+    }
+
+    memcpy(&rec->line_count, data + p, 4);
+    p += 4;
+
+    if (rec->line_count > 1u << 20) {
+        return VM_ERR_BOUNDS;
+    }
+
+    if ((size_t)rec->line_count * 8 > end - p) {
+        return VM_ERR_BOUNDS;
+    }
+
+    rec->lines_pos = p;
+    p += (size_t)rec->line_count * 8;
 
     memcpy(&rec->code_len, data + p, 4);
     p += 4;
@@ -245,7 +341,7 @@ static int load_buffer(VM *vm, uint8_t *buf, size_t fsize) {
 
     uint8_t version = buf[pos++];
 
-    if (version != 3) {
+    if (version != 5) {
         free(buf);
         vm->last_error = VM_ERR_VERSION;
         return vm->last_error;
@@ -591,7 +687,13 @@ static int load_buffer(VM *vm, uint8_t *buf, size_t fsize) {
         entry->code_offset = code_offset;
         entry->locals_count = rec.num_locals;
         entry->params_count = rec.num_params;
+        entry->posonly_count = rec.posonly_count;
         entry->defaults_count = rec.num_defaults;
+        entry->kwonly_count = rec.num_kwonly;
+        entry->vararg_slot = rec.vararg_slot == UINT16_MAX ? UINT32_MAX : rec.vararg_slot;
+        entry->kwarg_slot = rec.kwarg_slot == UINT16_MAX ? UINT32_MAX : rec.kwarg_slot;
+        entry->cells_count = rec.num_cells;
+        entry->frees_count = rec.num_free;
 
         if (rec.num_params > 0) {
             entry->param_names = malloc((size_t)rec.num_params * sizeof(uint32_t));
@@ -608,19 +710,88 @@ static int load_buffer(VM *vm, uint8_t *buf, size_t fsize) {
             );
         }
 
-        if (rec.num_defaults > 0) {
-            entry->default_consts = malloc((size_t)rec.num_defaults * sizeof(uint32_t));
+        if (rec.num_kwonly > 0) {
+            entry->kwonly_names = malloc((size_t)rec.num_kwonly * sizeof(uint32_t));
+            entry->kwonly_slots = malloc((size_t)rec.num_kwonly * sizeof(uint16_t));
+            entry->kwonly_flags = malloc((size_t)rec.num_kwonly * sizeof(uint8_t));
 
-            if (!entry->default_consts) {
+            if (!entry->kwonly_names || !entry->kwonly_slots || !entry->kwonly_flags) {
                 err = VM_ERR_OOM;
                 goto fail;
             }
 
             memcpy(
-                entry->default_consts,
-                plain + rec.defaults_pos,
-                (size_t)rec.num_defaults * sizeof(uint32_t)
+                entry->kwonly_names,
+                plain + rec.kwonly_names_pos,
+                (size_t)rec.num_kwonly * sizeof(uint32_t)
             );
+
+            memcpy(
+                entry->kwonly_slots,
+                plain + rec.kwonly_slots_pos,
+                (size_t)rec.num_kwonly * sizeof(uint16_t)
+            );
+
+            memcpy(
+                entry->kwonly_flags,
+                plain + rec.kwonly_flags_pos,
+                (size_t)rec.num_kwonly * sizeof(uint8_t)
+            );
+        }
+
+        if (rec.num_cells > 0) {
+            entry->cell_slots = malloc((size_t)rec.num_cells * sizeof(uint16_t));
+
+            if (!entry->cell_slots) {
+                err = VM_ERR_OOM;
+                goto fail;
+            }
+
+            memcpy(
+                entry->cell_slots,
+                plain + rec.cell_slots_pos,
+                (size_t)rec.num_cells * sizeof(uint16_t)
+            );
+        }
+
+        if (rec.num_free > 0) {
+            entry->free_names = malloc((size_t)rec.num_free * sizeof(uint32_t));
+
+            if (!entry->free_names) {
+                err = VM_ERR_OOM;
+                goto fail;
+            }
+
+            memcpy(
+                entry->free_names,
+                plain + rec.free_names_pos,
+                (size_t)rec.num_free * sizeof(uint32_t)
+            );
+        }
+
+        if (rec.line_count > 0) {
+            entry->line_offsets = malloc((size_t)rec.line_count * sizeof(uint32_t));
+            entry->line_numbers = malloc((size_t)rec.line_count * sizeof(uint32_t));
+
+            if (!entry->line_offsets || !entry->line_numbers) {
+                err = VM_ERR_OOM;
+                goto fail;
+            }
+
+            for (uint32_t l = 0; l < rec.line_count; l++) {
+                memcpy(
+                    &entry->line_offsets[l],
+                    plain + rec.lines_pos + (size_t)l * 8,
+                    sizeof(uint32_t)
+                );
+                memcpy(
+                    &entry->line_numbers[l],
+                    plain + rec.lines_pos + (size_t)l * 8 + 4,
+                    sizeof(uint32_t)
+                );
+            }
+
+            entry->line_count = rec.line_count;
         }
 
         code_offset += rec.code_len;
@@ -632,6 +803,38 @@ static int load_buffer(VM *vm, uint8_t *buf, size_t fsize) {
     }
 
     ppos = funcs_end;
+
+    if (ppos == plain_len) {
+        err = VM_ERR_BOUNDS;
+        goto fail;
+    }
+
+    uint8_t source_tag = plain[ppos];
+    uint32_t source_len;
+
+    if (plain_len - ppos < 5) {
+        err = VM_ERR_BOUNDS;
+        goto fail;
+    }
+
+    memcpy(&source_len, plain + ppos + 1, 4);
+
+    if (source_tag != 0x04 || source_len > plain_len - ppos - 5) {
+        err = VM_ERR_BOUNDS;
+        goto fail;
+    }
+
+    vm->source_name = malloc((size_t)source_len + 1);
+
+    if (!vm->source_name) {
+        err = VM_ERR_OOM;
+        goto fail;
+    }
+
+    memcpy(vm->source_name, plain + ppos + 5, source_len);
+    vm->source_name[source_len] = '\0';
+
+    ppos += 5 + source_len;
 
     if (ppos != plain_len) {
         err = VM_ERR_BOUNDS;

@@ -82,6 +82,8 @@ Value *builtin_oct(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
 Value *builtin_hex(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
 Value *builtin_format(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
 Value *builtin_ascii(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
+Value *builtin_hash(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
+Value *builtin_issubclass(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
 
 Value *construct_int(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
 Value *construct_float(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
@@ -95,6 +97,13 @@ Value *construct_set(VM *vm, Value **args, uint32_t nargs, const Value *kwnames)
 Value *construct_frozenset(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
 Value *construct_dict(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
 Value *construct_bytes(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
+Value *construct_object(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
+
+Value *builtin_enumerate(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
+Value *builtin_zip(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
+Value *builtin_map(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
+Value *builtin_filter(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
+Value *builtin_reversed(VM *vm, Value **args, uint32_t nargs, const Value *kwnames);
 
 enum {
     TYPE_INT,
@@ -115,11 +124,60 @@ enum {
     TYPE_FROZENSET,
     TYPE_DICT_KEYS,
     TYPE_DICT_VALUES,
-    TYPE_DICT_ITEMS
+    TYPE_DICT_ITEMS,
+    TYPE_OBJECT,
+    TYPE_ENUMERATE,
+    TYPE_ZIP,
+    TYPE_MAP,
+    TYPE_FILTER,
+    TYPE_REVERSED,
+    TYPE_LIST_ITERATOR,
+    TYPE_TUPLE_ITERATOR,
+    TYPE_STR_ITERATOR,
+    TYPE_STR_ASCII_ITERATOR,
+    TYPE_BYTES_ITERATOR,
+    TYPE_RANGE_ITERATOR,
+    TYPE_DICT_KEYITERATOR,
+    TYPE_DICT_VALUEITERATOR,
+    TYPE_DICT_ITEMITERATOR,
+    TYPE_SET_ITERATOR,
+    TYPE_DICT_REVERSEKEYITERATOR,
+    TYPE_DICT_REVERSEVALUEITERATOR,
+    TYPE_DICT_REVERSEITEMITERATOR,
+    TYPE_LIST_REVERSEITERATOR,
+    TYPE_CALLABLE_ITERATOR,
+    TYPE_BASE_EXCEPTION
 };
 
 int vm_install_type_globals(VM *vm);
 NativeFn type_constructor(int type_id);
+
+int64_t value_hash(const Value *v, int *err);
+
+int vm_init_exceptions(VM *vm);
+int exception_type_count(void);
+int exception_type_at(int index);
+int exception_index_of(int type_id);
+int exception_base_index(int index);
+const char *exception_type_name(int index);
+int exception_type_id_for_name(const char *name);
+int exception_type_is_subtype(int type_id, int base_id);
+Value *exception_type_object(int index);
+Value *value_new_exception(uint32_t type_id, Value *args);
+Value *construct_exception(VM *vm, uint32_t type_id, Value **args, uint32_t nargs, const Value *kwnames);
+int value_is_exception(const Value *v);
+const char *error_type_name(int error);
+const char *error_type_message(int error);
+Value *vm_exception_from_error(VM *vm, int error);
+Value *vm_take_exception(VM *vm, int error);
+uint32_t vm_frame_line(const VM *vm, const Frame *frame);
+void vm_write_exception(VM *vm);
+Value *vm_raise_error(VM *vm, const char *type_name, const char *message);
+Value *vm_make_raised_exception(VM *vm, Value *value);
+Value *vm_fail_with_value(VM *vm, const char *type_name, Value *value);
+int vm_exception_matches(VM *vm, Value *exception, Value *types);
+int value_type_is_subtype(const Value *type, const Value *base);
+int vm_unwind_to(VM *vm, Frame *stop_frame);
 
 extern const MethodEntry LIST_METHODS[];
 extern const uint32_t LIST_METHOD_COUNT;
@@ -140,6 +198,8 @@ MethodFn static_method_lookup(int type_id, const Value *name);
 int vm_init_callable_globals(VM *vm);
 void vm_call_value(VM *vm, uint32_t nargs, const Value *kwnames);
 void vm_call_method(VM *vm, uint32_t nargs, int has_kwnames);
+void vm_call_ex(VM *vm);
+void vm_make_function(VM *vm, uint32_t func_index);
 int vm_step(VM *vm);
 int vm_call_sync(VM *vm, Value *callable, Value **args, uint32_t nargs, Value **out_result);
 
@@ -241,6 +301,8 @@ void op_map_add(VM *vm);
 void op_get_index(VM *vm);
 void op_set_index(VM *vm);
 void op_delete_index(VM *vm);
+void op_store_slice(VM *vm);
+void op_delete_slice(VM *vm);
 char *format_value(const Value *v, const char *spec, size_t spec_len, int conv, size_t *out_len, int *err);
 void op_format_value(VM *vm, uint32_t conv);
 void op_build_string(VM *vm, uint32_t n);
@@ -252,6 +314,9 @@ void op_get_iter(VM *vm);
 Value *value_make_iter(VM *vm, const Value *iterable);
 Value *iterator_next(VM *vm, Value *iter);
 Value *value_list_from_iterable(VM *vm, const Value *iterable);
+int value_list_extend(VM *vm, Value *list, const Value *iterable);
+void op_list_extend(VM *vm);
+void op_dict_merge(VM *vm);
 int value_set_update(VM *vm, Value *set, const Value *iterable);
 int value_dict_update(VM *vm, Value *dict, const Value *source);
 void op_unpack_sequence(VM *vm, uint32_t n);

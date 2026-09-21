@@ -74,6 +74,52 @@ print(x)
         "100000\n",
         False,
     ),
+    "many_dict_keys": (
+        """
+d = {}
+i = 0
+while i < 50000:
+    d[i] = i * 2
+    i += 1
+total = 0
+for k in d:
+    total = total + d[k]
+print(len(d), total)
+""",
+        "50000 2499950000\n",
+        False,
+    ),
+    "many_set_items": (
+        """
+s = set()
+i = 0
+while i < 50000:
+    s.add(i % 25000)
+    i += 1
+print(len(s), 24999 in s, 25000 in s)
+""",
+        "25000 True False\n",
+        False,
+    ),
+    "deep_dict_churn": (
+        """
+d = {}
+i = 0
+while i < 5000:
+    d[i] = i
+    i += 1
+j = 0
+while j < 5000:
+    del d[j]
+    j += 2
+total = 0
+for k in d:
+    total = total + k
+print(len(d), total)
+""",
+        "2500 6250000\n",
+        False,
+    ),
 }
 
 

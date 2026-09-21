@@ -21,6 +21,9 @@ typedef enum {
     TAG_ITERATOR,
     TAG_FROZENSET,
     TAG_DICT_VIEW,
+    TAG_OBJECT,
+    TAG_CELL,
+    TAG_EXCEPTION,
 } ValueTag;
 
 typedef enum {
@@ -64,18 +67,26 @@ typedef enum {
 typedef struct DictEntry {
     Value *key;
     Value *value;
+    int64_t hash;
 } DictEntry;
 
 typedef struct DictObject {
     DictEntry *entries;
     uint32_t len;
     uint32_t cap;
+    uint32_t *index;
+    uint32_t index_cap;
+    uint32_t index_used;
 } DictObject;
 
 typedef struct SetObject {
     Value **items;
+    int64_t *hashes;
     uint32_t len;
     uint32_t cap;
+    uint32_t *index;
+    uint32_t index_cap;
+    uint32_t index_used;
 } SetObject;
 
 typedef struct BytesObject {
@@ -129,6 +140,11 @@ struct Value {
             Value *dict;
             ViewKind kind;
         } view;
+
+        struct {
+            uint32_t type_id;
+            Value *args;
+        } exception;
     } data;
 };
 
@@ -136,6 +152,10 @@ struct Function {
     FunctionKind kind;
     uint32_t index;
     const char *name;
+    Value *defaults;
+    Value *kwdefaults;
+    Value **cells;
+    uint32_t ncells;
 };
 
 Value *value_new_int(int64_t i);
@@ -156,6 +176,10 @@ Value *value_bool(int b);
 Value *value_new_function(FunctionKind kind, uint32_t index, const char *name);
 Value *value_new_range(int64_t start, int64_t stop, int64_t step);
 Value *value_new_iterator(IterKind kind);
+Value *value_new_object(void);
+Value *value_new_cell(void);
+Value *value_cell_get(const Value *cell);
+void value_cell_set(Value *cell, Value *value);
 int64_t value_range_len(int64_t start, int64_t stop, int64_t step);
 
 Value *value_retain(Value *v);
@@ -187,6 +211,7 @@ int value_truthy(const Value *v);
 int value_compare(const Value *a, const Value *b);
 int value_equal(const Value *a, const Value *b);
 int value_is_hashable(const Value *v);
+int64_t value_hash(const Value *v, int *err);
 
 int64_t value_length(const Value *v);
 Value *value_item_at(const Value *v, int64_t idx);

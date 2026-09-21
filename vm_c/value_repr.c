@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "unicode.h"
-#include "value.h"
+#include "vm_internal.h"
 
 #define REPR_MAX_DEPTH 64
 
@@ -290,14 +290,21 @@ static void write_value(Buffer *b, const Value *v, int mode, const Value **stack
             return;
 
         case TAG_FUNCTION: {
-            char text[128];
-            snprintf(
-                text,
-                sizeof(text),
-                "<%sfunction %s>",
-                v->data.func && v->data.func->kind == FUNC_BUILTIN ? "built-in " : "",
-                v->data.func && v->data.func->name ? v->data.func->name : "?"
-            );
+            char text[160];
+            int builtin = v->data.func && v->data.func->kind == FUNC_BUILTIN;
+            const char *name = v->data.func && v->data.func->name ? v->data.func->name : "?";
+
+            if (builtin) {
+                snprintf(text, sizeof(text), "<built-in function %s>", name);
+            } else {
+                snprintf(
+                    text,
+                    sizeof(text),
+                    "<function %s at 0x%016llX>",
+                    name,
+                    (unsigned long long)(uintptr_t)v
+                );
+            }
             buffer_text(b, text);
             return;
         }
@@ -331,9 +338,72 @@ static void write_value(Buffer *b, const Value *v, int mode, const Value **stack
             return;
         }
 
-        case TAG_ITERATOR:
-            buffer_text(b, "<iterator object>");
+        case TAG_ITERATOR: {
+            char text[96];
+            snprintf(
+                text,
+                sizeof(text),
+                "<%s object at 0x%016llX>",
+                value_type_name(value_type_of(v)),
+                (unsigned long long)(uintptr_t)v
+            );
+            buffer_text(b, text);
             return;
+        }
+
+        case TAG_OBJECT: {
+            char text[96];
+            snprintf(
+                text,
+                sizeof(text),
+                "<object object at 0x%016llX>",
+                (unsigned long long)(uintptr_t)v
+            );
+            buffer_text(b, text);
+            return;
+        }
+
+        case TAG_EXCEPTION: {
+            int index = exception_index_of((int)v->data.exception.type_id);
+            const char *name = index >= 0 ? exception_type_name(index) : "Exception";
+            const Value *args = v->data.exception.args;
+            uint32_t count = args && args->tag == TAG_TUPLE ? args->data.tuple.len : 0;
+
+            if (mode == MODE_STR) {
+                if (count == 0) return;
+
+                if (exception_type_is_subtype(
+                        (int)v->data.exception.type_id,
+                        exception_type_id_for_name("KeyError"))) {
+                    write_value(
+                        b,
+                        count == 1 ? args->data.tuple.items[0] : args,
+                        MODE_REPR,
+                        stack,
+                        depth);
+                    return;
+                }
+
+                if (count == 1) {
+                    write_value(b, args->data.tuple.items[0], MODE_STR, stack, depth);
+                    return;
+                }
+
+                write_value(b, args, MODE_STR, stack, depth);
+                return;
+            }
+
+            buffer_text(b, name);
+            buffer_text(b, "(");
+
+            for (uint32_t i = 0; i < count; i++) {
+                if (i > 0) buffer_text(b, ", ");
+                write_value(b, args->data.tuple.items[i], mode, stack, depth);
+            }
+
+            buffer_text(b, ")");
+            return;
+        }
 
         default:
             break;

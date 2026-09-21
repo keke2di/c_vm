@@ -362,6 +362,13 @@ Value *construct_frozenset(VM *vm, Value **args, uint32_t nargs, const Value *kw
 
 static const char *const BYTES_PARAMS[] = { "source", "encoding", "errors" };
 
+Value *construct_object(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    if (check_positional(vm, nargs, kwnames, 0, 0) != 0) return NULL;
+
+    Value *obj = value_new_object();
+    return obj ? obj : vm_fail(vm, VM_ERR_OOM);
+}
+
 Value *construct_bytes(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
     Value *slots[3];
     if (bind_args(vm, args, nargs, kwnames, BYTES_PARAMS, 3, 3, 0, slots) != 0) return NULL;

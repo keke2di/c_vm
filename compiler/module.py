@@ -12,9 +12,10 @@ def build_module(
     constants: ConstantPool,
     names: GlobalNames,
     entry_function: str = "__main__",
+    source_name: str = "<module>",
 ) -> bytes:
     """
     Build the plaintext module bytes.
     Wraps container.build_module with the entry function name.
     """
-    return _build_container(functions, constants, names, entry_function)
+    return _build_container(functions, constants, names, entry_function, source_name)

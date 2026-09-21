@@ -74,6 +74,22 @@ CANONICAL_OPCODES = {
     "CALL_BUILTIN":     0x61,
     "CALL_METHOD":      0x62,
     "CALL_METHOD_KW":   0x65,
+    "STORE_SLICE":      0x66,
+    "DELETE_SLICE":     0x67,
+    "LOAD_DEREF":       0x68,
+    "STORE_DEREF":      0x69,
+    "DELETE_DEREF":     0x6A,
+    "LOAD_CLOSURE":     0x6B,
+    "MAKE_FUNCTION":    0x6C,
+    "CALL_EX":          0x6D,
+    "LIST_EXTEND":      0x6E,
+    "DICT_MERGE":       0x6F,
+    "SETUP_HANDLER":    0x70,
+    "POP_HANDLER":      0x71,
+    "EXCEPT_MATCH":     0x72,
+    "EXCEPT_CLEAR":     0x73,
+    "RERAISE":          0x74,
+    "RAISE_VARARGS":    0x75,
 
     "HALT":             0xFF,
 }
@@ -114,6 +130,13 @@ OPERAND_WIDTHS = {
     "PRINT":            4,
     "CALL_METHOD":      4,
     "CALL_METHOD_KW":   4,
+    "LOAD_DEREF":       4,
+    "STORE_DEREF":      4,
+    "DELETE_DEREF":     4,
+    "LOAD_CLOSURE":     4,
+    "MAKE_FUNCTION":    4,
+    "SETUP_HANDLER":    4,
+    "RAISE_VARARGS":    4,
     "POP_JUMP_IF_FALSE":4,
     "POP_JUMP_IF_TRUE": 4,
     "JUMP_ABSOLUTE":    4,
@@ -130,7 +153,7 @@ def operand_width_for_code(op: int) -> int:
 
 OPERAND_WIDTH = operand_width_for_code
 
-OPCODE_TABLE_VERSION = 8
+OPCODE_TABLE_VERSION = 11
 
 _globals = globals()
 for _name, _value in OPCODES.items():

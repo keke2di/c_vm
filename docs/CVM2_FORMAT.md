@@ -94,18 +94,36 @@ The names section holds globals, function names, and parameter names.
 
 A u32 function count (1 to 4096), followed by one record per function.
 
-Function record, format version 3:
+Function record, format version 4:
 
 | Field | Size | Description |
 |:------|:-----|:------------|
 | name index | u32 | Index into the names section |
 | local count | u16 | Number of local slots |
-| parameter count | u16 | Number of parameters, at most the local count |
+| parameter count | u16 | Number of positional parameters (positional-only plus positional-or-keyword) |
+| positional-only count | u16 | How many of the positional parameters are positional-only |
 | default count | u16 | Number of defaults, at most the parameter count |
+| keyword-only count | u16 | Number of keyword-only parameters |
+| `*args` slot | u16 | Local slot of `*args`, or `0xFFFF` |
+| `**kwargs` slot | u16 | Local slot of `**kwargs`, or `0xFFFF` |
+| cell count | u16 | Number of locals this function owns a cell for |
+| free count | u16 | Number of captured free variables |
 | parameter names | u32 × parameter count | Name indexes, in parameter order |
-| default values | u32 × default count | Constant indexes for the last parameters |
+| keyword-only names | u32 × keyword-only count | Name indexes |
+| keyword-only slots | u16 × keyword-only count | Local slot of each keyword-only parameter |
+| keyword-only flags | u8 × keyword-only count | 1 when the parameter has a default |
+| cell slots | u16 × cell count | Local slot each cell replaces |
+| free names | u32 × free count | Names captured from enclosing functions, in closure order |
+| line count | u32 | Number of entries in the line table |
+| line table | (u32 offset, u32 line) × line count | Byte offset of the first instruction on a new source line, paired with that line |
 | code length | u32 | Bytecode length |
 | code | code length bytes | Function bytecode, see [Bytecode](BYTECODE.md) |
+
+Default *values* are no longer stored in the record: the `MAKE_FUNCTION` instruction builds them at definition time, so a default may be any expression.
+
+### Source section
+
+Section `0x04` holds the source file name as UTF-8 bytes. The runtime uses it, with the line tables, to print tracebacks.
 
 ## Packed executables
 
@@ -153,8 +171,12 @@ The runtime accepts only the format version it was built for.
 |:---------------|:----|:-------|
 | 2 | v0.1.0 | First public format |
 | 3 | v0.2.0 | Function records carry a default count, parameter names, and default values |
+| 4 | v0.4.0 (unreleased) | Function records carry every parameter kind, cell slots, and free-variable names; default values moved to `MAKE_FUNCTION` |
+| 5 | v0.4.0 (unreleased) | Function records carry a line table, and a new source section records the file name |
 
-The container format has stayed at version 3 since v0.2.0. Later releases have added instructions and runtime types without changing the container layout or the serialized constant tags, so the loader still accepts format version 3.
+The container format stayed at version 3 from v0.2.0 through v0.3.0. Later releases added instructions and runtime types without changing the container layout or the serialized constant tags, so the loader kept accepting format version 3.
 
 {: .note }
 The instruction set can change between releases, and when it does, a `.cvm` module runs only on a matching runtime. **v0.3.0 did not change it:** both the container format (3) and the instruction set are unchanged since v0.2.2, so modules compiled with v0.2.2 run on v0.3.0 without recompiling. Packed executables are never affected either way, because each one carries the runtime it was built with.
+
+The unreleased work after v0.3.0 first added two instructions, `STORE_SLICE` (`0x66`) and `DELETE_SLICE` (`0x67`), and moved the opcode table to 9 without touching the container. Functions, scopes and closures then changed the function record itself, so **the container format moved to version 4** (opcode table 10 for `LOAD_DEREF`/`STORE_DEREF`/`DELETE_DEREF`, `LOAD_CLOSURE`, `MAKE_FUNCTION`, `CALL_EX`, `LIST_EXTEND`, `DICT_MERGE`), and exceptions added a per-function line table plus a source section, making it **version 5** (opcode table 11 for `SETUP_HANDLER`, `POP_HANDLER`, `EXCEPT_MATCH`, `EXCEPT_CLEAR`, `RERAISE`, `RAISE_VARARGS`). Modules compiled by v0.3.0 or earlier no longer load.

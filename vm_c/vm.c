@@ -37,7 +37,197 @@ static void frame_free(Frame *frame) {
         }
         free(frame->locals);
     }
+    if (frame->cells) {
+        for (uint32_t i = 0; i < frame->cells_cap; i++) {
+            if (frame->cells[i]) value_release(frame->cells[i]);
+        }
+        free(frame->cells);
+    }
+    free(frame->handlers);
     free(frame);
+}
+
+static int handler_push(Frame *frame, uint32_t target, uint32_t stack_top) {
+    if (frame->handler_count >= frame->handler_cap) {
+        uint32_t cap = frame->handler_cap == 0 ? 4 : frame->handler_cap * 2;
+        Handler *grown = realloc(frame->handlers, cap * sizeof(Handler));
+
+        if (!grown) return -1;
+
+        frame->handlers = grown;
+        frame->handler_cap = cap;
+    }
+
+    frame->handlers[frame->handler_count].target = target;
+    frame->handlers[frame->handler_count].stack_top = stack_top;
+    frame->handler_count++;
+    return 0;
+}
+
+static void op_setup_handler(VM *vm, uint32_t target) {
+    if (!vm->current_frame) {
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    if (handler_push(vm->current_frame, target, vm->stack_top) != 0) {
+        vm->last_error = VM_ERR_OOM;
+    }
+}
+
+static void op_pop_handler(VM *vm) {
+    if (!vm->current_frame || vm->current_frame->handler_count == 0) {
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    vm->current_frame->handler_count--;
+}
+
+static void op_except_clear(VM *vm) {
+    Value *value = vm_pop(vm);
+
+    if (!value) return;
+
+    value_release(value);
+
+    if (vm->exception) {
+        value_release(vm->exception);
+        vm->exception = NULL;
+    }
+}
+
+static void op_except_match(VM *vm) {
+    Value *types = vm_pop(vm);
+    Value *exception = vm->stack_top > 0 ? vm->stack[vm->stack_top - 1] : NULL;
+
+    if (!types || !exception) {
+        if (types) value_release(types);
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    int matched = vm_exception_matches(vm, exception, types);
+
+    value_release(types);
+
+    if (matched < 0) {
+        vm->last_error = VM_ERR_TYPE;
+        return;
+    }
+
+    vm_push(vm, value_bool(matched));
+}
+
+static void op_reraise(VM *vm) {
+    Value *exception = NULL;
+
+    if (vm->stack_top > 0 && value_is_exception(vm->stack[vm->stack_top - 1])) {
+        exception = vm_pop(vm);
+    } else if (vm->exception) {
+        exception = value_retain(vm->exception);
+    }
+
+    if (!exception) {
+        exception = vm_exception_from_error(vm, VM_ERR_RUNTIME);
+
+        if (exception) {
+            value_release(exception);
+            exception = vm_exception_from_error(vm, VM_ERR_RUNTIME);
+        }
+    }
+
+    if (!exception) {
+        vm->last_error = VM_ERR_OOM;
+        return;
+    }
+
+    if (vm->exception) value_release(vm->exception);
+    vm->exception = exception;
+    vm->last_error = VM_ERR_RAISED;
+}
+
+static void op_raise_varargs(VM *vm, uint32_t count) {
+    Value *exception = NULL;
+
+    if (count == 0) {
+        if (!vm->exception) {
+            exception = vm_raise_error(vm, "RuntimeError", "No active exception to re-raise");
+            if (!exception) return;
+        } else {
+            exception = value_retain(vm->exception);
+        }
+    } else {
+        Value *value = vm_pop(vm);
+
+        if (!value) {
+            vm->last_error = VM_ERR_STACK;
+            return;
+        }
+
+        exception = vm_make_raised_exception(vm, value);
+        value_release(value);
+
+        if (!exception) return;
+    }
+
+    if (vm->exception) value_release(vm->exception);
+    vm->exception = exception;
+    vm->last_error = VM_ERR_RAISED;
+}
+
+static void op_load_deref(VM *vm, uint32_t idx) {
+    Frame *frame = vm->current_frame;
+
+    if (!frame || idx >= frame->cells_cap || !frame->cells[idx]) {
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    Value *value = value_cell_get(frame->cells[idx]);
+
+    if (!value) {
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    vm_push(vm, value);
+}
+
+static void op_store_deref(VM *vm, uint32_t idx) {
+    Frame *frame = vm->current_frame;
+
+    if (!frame || idx >= frame->cells_cap || !frame->cells[idx]) {
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    Value *value = vm_pop(vm);
+    if (!value) return;
+
+    value_cell_set(frame->cells[idx], value);
+}
+
+static void op_delete_deref(VM *vm, uint32_t idx) {
+    Frame *frame = vm->current_frame;
+
+    if (!frame || idx >= frame->cells_cap || !frame->cells[idx]) {
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    value_cell_set(frame->cells[idx], NULL);
+}
+
+static void op_load_closure(VM *vm, uint32_t idx) {
+    Frame *frame = vm->current_frame;
+
+    if (!frame || idx >= frame->cells_cap || !frame->cells[idx]) {
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    vm_push(vm, frame->cells[idx]);
 }
 
 static int op_return(VM *vm) {
@@ -71,6 +261,11 @@ static int op_return(VM *vm) {
     }
 
     vm->current_frame = old_frame->prev;
+
+    if (vm->exception) {
+        value_release(vm->exception);
+        vm->exception = NULL;
+    }
 
     if (!retval) {
         vm->last_error = VM_ERR_OOM;
@@ -186,6 +381,10 @@ static int vm_prepare(VM *vm) {
         return 0;
     }
 
+    if (vm_init_exceptions(vm) != VM_ERR_OK) {
+        return 0;
+    }
+
     vm->stack_cap = STACK_INIT_CAP;
     vm->stack = malloc(vm->stack_cap * sizeof(Value*));
     if (!vm->stack) {
@@ -205,6 +404,11 @@ static int vm_prepare(VM *vm) {
     frame->func = entry_func;
     frame->locals_cap = entry_func->locals_count;
     frame->locals = NULL;
+    frame->cells = NULL;
+    frame->cells_cap = 0;
+    frame->handlers = NULL;
+    frame->handler_count = 0;
+    frame->handler_cap = 0;
     frame->stack_base = 0;
 
     if (frame->locals_cap > 0) {
@@ -444,6 +648,70 @@ int vm_step(VM *vm) {
             op_set_index(vm);
             break;
 
+        case OP_STORE_SLICE:
+            op_store_slice(vm);
+            break;
+
+        case OP_DELETE_SLICE:
+            op_delete_slice(vm);
+            break;
+
+        case OP_LOAD_DEREF:
+            if (read_operand(vm, &operand)) op_load_deref(vm, operand);
+            break;
+
+        case OP_STORE_DEREF:
+            if (read_operand(vm, &operand)) op_store_deref(vm, operand);
+            break;
+
+        case OP_DELETE_DEREF:
+            if (read_operand(vm, &operand)) op_delete_deref(vm, operand);
+            break;
+
+        case OP_LOAD_CLOSURE:
+            if (read_operand(vm, &operand)) op_load_closure(vm, operand);
+            break;
+
+        case OP_MAKE_FUNCTION:
+            if (read_operand(vm, &operand)) vm_make_function(vm, operand);
+            break;
+
+        case OP_CALL_EX:
+            vm_call_ex(vm);
+            break;
+
+        case OP_LIST_EXTEND:
+            op_list_extend(vm);
+            break;
+
+        case OP_DICT_MERGE:
+            op_dict_merge(vm);
+            break;
+
+        case OP_SETUP_HANDLER:
+            if (read_operand(vm, &operand)) op_setup_handler(vm, operand);
+            break;
+
+        case OP_POP_HANDLER:
+            op_pop_handler(vm);
+            break;
+
+        case OP_EXCEPT_MATCH:
+            op_except_match(vm);
+            break;
+
+        case OP_EXCEPT_CLEAR:
+            op_except_clear(vm);
+            break;
+
+        case OP_RERAISE:
+            op_reraise(vm);
+            break;
+
+        case OP_RAISE_VARARGS:
+            if (read_operand(vm, &operand)) op_raise_varargs(vm, operand);
+            break;
+
         case OP_GET_ITER_ITEM:
             op_get_iter_item(vm);
             break;
@@ -504,6 +772,59 @@ int vm_step(VM *vm) {
     return 0;
 }
 
+static void vm_drop_frame(VM *vm) {
+    Frame *frame = vm->current_frame;
+
+    if (!frame) return;
+
+    while (vm->stack_top > frame->stack_base) {
+        Value *value = vm_pop(vm);
+        if (value) value_release(value);
+    }
+
+    vm->current_frame = frame->prev;
+
+    if (frame->return_ip) vm->ip = frame->return_ip;
+
+    frame_free(frame);
+}
+
+int vm_unwind_to(VM *vm, Frame *stop_frame) {
+    if (vm->last_error != VM_ERR_OK && vm->last_error != VM_ERR_RAISED && !vm->exception) {
+        vm->exception = vm_exception_from_error(vm, vm->last_error);
+        if (!vm->exception) return 0;
+    }
+
+    Frame *target = NULL;
+
+    for (Frame *f = vm->current_frame; f != NULL && f != stop_frame; f = f->prev) {
+        if (f->handler_count > 0) {
+            target = f;
+            break;
+        }
+    }
+
+    if (!target && !stop_frame) return 0;
+
+    while (vm->current_frame != target && vm->current_frame != stop_frame) {
+        vm_drop_frame(vm);
+    }
+
+    if (!target) return 0;
+
+    Handler handler = target->handlers[--target->handler_count];
+
+    while (vm->stack_top > handler.stack_top) {
+        Value *value = vm_pop(vm);
+        if (value) value_release(value);
+    }
+
+    vm_push(vm, vm->exception);
+    vm->ip = vm->bytecode + target->func->code_offset + handler.target;
+    vm->last_error = VM_ERR_OK;
+    return 1;
+}
+
 int vm_run(VM *vm) {
     if (!vm || vm->entry_func_index >= vm->num_functions) {
         if (vm) vm->last_error = VM_ERR_FUNC_NOT_FOUND;
@@ -514,17 +835,44 @@ int vm_run(VM *vm) {
         return vm->last_error;
     }
 
-    while (vm->last_error == VM_ERR_OK) {
-        if (vm->ip >= vm->bytecode + vm->bytecode_len) {
-            vm->last_error = VM_ERR_BOUNDS;
+    while (1) {
+        if (vm->last_error != VM_ERR_OK) {
+            if (vm_unwind_to(vm, NULL)) continue;
             break;
         }
+
+        if (vm->ip >= vm->bytecode + vm->bytecode_len) {
+            vm->last_error = VM_ERR_BOUNDS;
+            continue;
+        }
+
         if (vm_step(vm)) {
             break;
         }
     }
 
+    if (vm->last_error != VM_ERR_OK && !vm->exception) {
+        vm->exception = vm_exception_from_error(vm, vm->last_error);
+    }
+
     return vm->last_error;
+}
+
+int vm_report_error(VM *vm, int is_load_error) {
+    if (!vm) return 1;
+
+    if (is_load_error) {
+        fprintf(stderr, "VM load error: %s\n", vm_error_string(vm));
+        return 1;
+    }
+
+    if (vm->exception) {
+        vm_write_exception(vm);
+        return 1;
+    }
+
+    fprintf(stderr, "VM run error: %s\n", vm_error_string(vm));
+    return 1;
 }
 
 void vm_free(VM *vm) {
@@ -556,10 +904,19 @@ void vm_free(VM *vm) {
     if (vm->functions) {
         for (uint32_t i = 0; i < vm->num_functions; i++) {
             free(vm->functions[i].param_names);
-            free(vm->functions[i].default_consts);
+            free(vm->functions[i].kwonly_names);
+            free(vm->functions[i].kwonly_slots);
+            free(vm->functions[i].kwonly_flags);
+            free(vm->functions[i].cell_slots);
+            free(vm->functions[i].free_names);
+            free(vm->functions[i].line_offsets);
+            free(vm->functions[i].line_numbers);
         }
         free(vm->functions);
     }
+
+    free(vm->source_name);
+    if (vm->exception) value_release(vm->exception);
 
     if (vm->stack) {
         for (uint32_t i = 0; i < vm->stack_top; i++) {

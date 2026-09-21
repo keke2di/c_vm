@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -11,19 +12,15 @@ STUB = ROOT / "vm_c" / "stub.exe"
 EXAMPLES = ROOT / "examples"
 OUTPUT = ROOT / "output"
 TIMEOUT = 120
-ENV = {**os.environ, "PYTHONUTF8": "1"}
+ENV = {**os.environ, "PYTHONUTF8": "1", "PYTHONHASHSEED": "0"}
+
+ADDRESS = re.compile(r" at 0x[0-9a-fA-F]+")
+
+KNOWN_DIFFERENCES = {}
 
 
-KNOWN_DIFFERENCES = {
-    "test_callable_expr.py": (
-        "7\n-1\n5\n42\ntruthy\n<function add>\n<built-in function print>\n",
-        "function repr has no address",
-    ),
-    "test_enumerate_simple.py": (
-        "<iterator object>\n",
-        "iterator repr is generic and has no address",
-    ),
-}
+def normalize(text):
+    return ADDRESS.sub(" at 0xADDR", text)
 
 
 def run(command, cwd=ROOT):
@@ -107,7 +104,7 @@ def check_example(source):
 
     known = KNOWN_DIFFERENCES.get(source.name)
     if known is not None:
-        if result.stdout == cpython_stdout and cvm_failed == cpython_failed:
+        if normalize(result.stdout) == normalize(cpython_stdout) and cvm_failed == cpython_failed:
             return False, "matches CPython now; remove it from KNOWN_DIFFERENCES", ""
         expected_stdout, reason = known
         expected_failure = False
@@ -117,7 +114,7 @@ def check_example(source):
         problem = "runtime" if cvm_failed else "expected a runtime failure like CPython"
         return False, problem, result.stdout + result.stderr
 
-    if result.stdout != expected_stdout:
+    if normalize(result.stdout) != normalize(expected_stdout):
         source_of_truth = "Known cVM output" if known is not None else "CPython"
         return False, "output", (
             f"{source_of_truth}:\n{expected_stdout!r}\ncVM:\n{result.stdout!r}\n"

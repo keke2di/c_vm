@@ -1,7 +1,7 @@
 #ifndef CVM_OPCODES_H
 #define CVM_OPCODES_H
 
-#define CVM_OPCODE_TABLE_VERSION 8
+#define CVM_OPCODE_TABLE_VERSION 11
 
 typedef enum {
     OP_NOP = 0x00,
@@ -71,6 +71,22 @@ typedef enum {
     OP_CALL_BUILTIN = 0x61,
     OP_CALL_METHOD = 0x62,
     OP_CALL_METHOD_KW = 0x65,
+    OP_STORE_SLICE = 0x66,
+    OP_DELETE_SLICE = 0x67,
+    OP_LOAD_DEREF = 0x68,
+    OP_STORE_DEREF = 0x69,
+    OP_DELETE_DEREF = 0x6A,
+    OP_LOAD_CLOSURE = 0x6B,
+    OP_MAKE_FUNCTION = 0x6C,
+    OP_CALL_EX = 0x6D,
+    OP_LIST_EXTEND = 0x6E,
+    OP_DICT_MERGE = 0x6F,
+    OP_SETUP_HANDLER = 0x70,
+    OP_POP_HANDLER = 0x71,
+    OP_EXCEPT_MATCH = 0x72,
+    OP_EXCEPT_CLEAR = 0x73,
+    OP_RERAISE = 0x74,
+    OP_RAISE_VARARGS = 0x75,
     OP_HALT = 0xFF,
 } cvm_opcode_t;
 
@@ -101,6 +117,13 @@ static inline int cvm_operand_width(cvm_opcode_t op) {
         case OP_CALL_BUILTIN: return 4;
         case OP_CALL_METHOD: return 4;
         case OP_CALL_METHOD_KW: return 4;
+        case OP_LOAD_DEREF: return 4;
+        case OP_STORE_DEREF: return 4;
+        case OP_DELETE_DEREF: return 4;
+        case OP_LOAD_CLOSURE: return 4;
+        case OP_MAKE_FUNCTION: return 4;
+        case OP_SETUP_HANDLER: return 4;
+        case OP_RAISE_VARARGS: return 4;
         default: return 0;
     }
 }

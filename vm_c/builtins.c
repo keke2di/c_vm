@@ -76,7 +76,7 @@ static Value *builtin_repr(VM *vm, Value **args, uint32_t nargs, const Value *kw
     return result;
 }
 
-static Value *builtin_enumerate(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+Value *builtin_enumerate(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
     Value *slots[2];
     if (bind_args(vm, args, nargs, kwnames, ENUMERATE_PARAMS, 2, 2, 1, slots) != 0) return NULL;
 
@@ -129,7 +129,7 @@ static int make_sub_iters(VM *vm, Value **iterables, uint32_t count, Value ***ou
     return 0;
 }
 
-static Value *builtin_zip(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+Value *builtin_zip(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
     uint32_t npos = nargs - kw_count(kwnames);
     Value *strict;
     if (bind_keywords(vm, args + npos, kwnames, STRICT_KEYWORD, 1, &strict) != 0) return NULL;
@@ -149,7 +149,7 @@ static Value *builtin_zip(VM *vm, Value **args, uint32_t nargs, const Value *kwn
     return iter;
 }
 
-static Value *builtin_map(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+Value *builtin_map(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
     uint32_t npos = nargs - kw_count(kwnames);
     Value *strict;
     if (bind_keywords(vm, args + npos, kwnames, STRICT_KEYWORD, 1, &strict) != 0) return NULL;
@@ -171,7 +171,7 @@ static Value *builtin_map(VM *vm, Value **args, uint32_t nargs, const Value *kwn
     return iter;
 }
 
-static Value *builtin_filter(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+Value *builtin_filter(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
     if (check_positional(vm, nargs, kwnames, 2, 2) != 0) return NULL;
 
     Value *sub = value_make_iter(vm, args[1]);
@@ -188,7 +188,7 @@ static Value *builtin_filter(VM *vm, Value **args, uint32_t nargs, const Value *
     return iter;
 }
 
-static Value *builtin_reversed(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+Value *builtin_reversed(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
     if (check_positional(vm, nargs, kwnames, 1, 1) != 0) return NULL;
 
     Value *seq = args[0];
@@ -249,11 +249,6 @@ static const BuiltinEntry BUILTINS[] = {
     {"print", builtin_print},
     {"len", builtin_len},
     {"repr", builtin_repr},
-    {"enumerate", builtin_enumerate},
-    {"zip", builtin_zip},
-    {"map", builtin_map},
-    {"filter", builtin_filter},
-    {"reversed", builtin_reversed},
     {"iter", builtin_iter},
     {"next", builtin_next},
     {"abs", builtin_abs},
@@ -276,6 +271,8 @@ static const BuiltinEntry BUILTINS[] = {
     {"hex", builtin_hex},
     {"format", builtin_format},
     {"ascii", builtin_ascii},
+    {"hash", builtin_hash},
+    {"issubclass", builtin_issubclass},
 };
 
 #define BUILTIN_COUNT ((uint32_t)(sizeof(BUILTINS) / sizeof(BUILTINS[0])))

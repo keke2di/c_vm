@@ -7,32 +7,41 @@ static int int_like(const Value *v) {
     return v->tag == TAG_INT || v->tag == TAG_BOOL;
 }
 
-static int match_type(const Value *x, const Value *type) {
-    if (value_type_of(x) == type) return 1;
-    if (x->tag == TAG_BOOL && strcmp(value_type_name(type), "int") == 0) return 1;
-    return 0;
+static int is_subtype(const Value *type, const Value *base) {
+    return value_type_is_subtype(type, base);
+}
+
+static int type_matches(const Value *type, const Value *classinfo) {
+    if (classinfo->tag == TAG_TYPE) {
+        return is_subtype(type, classinfo);
+    }
+
+    if (classinfo->tag == TAG_TUPLE) {
+        for (uint32_t i = 0; i < classinfo->data.tuple.len; i++) {
+            int result = type_matches(type, classinfo->data.tuple.items[i]);
+            if (result != 0) return result;
+        }
+        return 0;
+    }
+
+    return -1;
 }
 
 Value *builtin_isinstance(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
     if (check_positional(vm, nargs, kwnames, 2, 2) != 0) return NULL;
 
-    Value *x = args[0];
-    Value *classinfo = args[1];
+    int result = type_matches(value_type_of(args[0]), args[1]);
+    if (result < 0) return vm_fail(vm, VM_ERR_TYPE);
+    return value_bool(result);
+}
 
-    if (classinfo->tag == TAG_TYPE) {
-        return value_bool(match_type(x, classinfo));
-    }
+Value *builtin_issubclass(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    if (check_positional(vm, nargs, kwnames, 2, 2) != 0) return NULL;
+    if (args[0]->tag != TAG_TYPE) return vm_fail(vm, VM_ERR_TYPE);
 
-    if (classinfo->tag == TAG_TUPLE) {
-        for (uint32_t i = 0; i < classinfo->data.tuple.len; i++) {
-            Value *entry = classinfo->data.tuple.items[i];
-            if (entry->tag != TAG_TYPE) return vm_fail(vm, VM_ERR_TYPE);
-            if (match_type(x, entry)) return value_bool(1);
-        }
-        return value_bool(0);
-    }
-
-    return vm_fail(vm, VM_ERR_TYPE);
+    int result = type_matches(args[0], args[1]);
+    if (result < 0) return vm_fail(vm, VM_ERR_TYPE);
+    return value_bool(result);
 }
 
 Value *builtin_callable(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
@@ -134,4 +143,14 @@ Value *builtin_ascii(VM *vm, Value **args, uint32_t nargs, const Value *kwnames)
     Value *result = value_new_string_len(s, strlen(s));
     free(s);
     return result ? result : vm_fail(vm, VM_ERR_OOM);
+}
+
+Value *builtin_hash(VM *vm, Value **args, uint32_t nargs, const Value *kwnames) {
+    if (check_positional(vm, nargs, kwnames, 1, 1) != 0) return NULL;
+
+    int error = 0;
+    int64_t h = value_hash(args[0], &error);
+    if (error) return vm_fail(vm, VM_ERR_TYPE);
+
+    return value_new_int(h);
 }

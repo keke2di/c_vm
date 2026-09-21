@@ -154,18 +154,14 @@ def find_code_offset(payload):
     if num_functions == 0:
         raise RuntimeError("no functions")
 
-    if pos + 14 > len(payload):
+    if pos + 26 > len(payload):
         raise RuntimeError("truncated function")
 
-    pos += 4
-    pos += 2
-    num_params, num_defaults = struct.unpack_from("<HH", payload, pos)
-    pos += 4
-    pos += 4 * (num_params + num_defaults)
+    record = read_function_record(payload, pos)
 
-    code_len_offset = pos
-    code_len = struct.unpack_from("<I", payload, pos)[0]
-    pos += 4
+    code_len_offset = record["code_len_offset"]
+    code_len = record["code_len"]
+    pos = record["code_offset"]
 
     if code_len == 0:
         raise RuntimeError("empty function")
@@ -174,6 +170,46 @@ def find_code_offset(payload):
         raise RuntimeError("truncated code")
 
     return pos, code_len_offset, code_len
+
+
+def read_function_record(payload, pos):
+    header = struct.unpack_from("<IHHHHHHHHH", payload, pos)
+    (_, num_locals, num_params, posonly, num_defaults,
+     num_kwonly, _vararg, _kwarg, num_cells, num_free) = header
+
+    param_names = pos + 22
+    kwonly_names = param_names + 4 * num_params
+    kwonly_slots = kwonly_names + 4 * num_kwonly
+    kwonly_flags = kwonly_slots + 2 * num_kwonly
+    cell_slots = kwonly_flags + num_kwonly
+    free_names = cell_slots + 2 * num_cells
+    line_count_offset = free_names + 4 * num_free
+    line_count = struct.unpack_from("<I", payload, line_count_offset)[0]
+    code_len_offset = line_count_offset + 4 + 8 * line_count
+    code_len = struct.unpack_from("<I", payload, code_len_offset)[0]
+
+    return {
+        "num_locals": num_locals,
+        "num_params": num_params,
+        "posonly_count": pos + 8,
+        "num_defaults": pos + 10,
+        "num_kwonly": pos + 12,
+        "vararg_slot": pos + 14,
+        "kwarg_slot": pos + 16,
+        "num_cells": pos + 18,
+        "num_free": pos + 20,
+        "param_names": param_names,
+        "kwonly_names": kwonly_names,
+        "kwonly_slots": kwonly_slots,
+        "kwonly_flags": kwonly_flags,
+        "cell_slots": cell_slots,
+        "free_names": free_names,
+        "line_count": line_count_offset,
+        "code_len_offset": code_len_offset,
+        "code_len": code_len,
+        "code_offset": code_len_offset + 4,
+        "next": code_len_offset + 4 + code_len,
+    }
 
 
 def find_function_record(payload, num_params):
@@ -196,20 +232,12 @@ def find_function_record(payload, num_params):
     pos += 4
 
     for _ in range(num_functions):
-        record_params, record_defaults = struct.unpack_from("<HH", payload, pos + 6)
-        param_names = pos + 10
-        defaults = param_names + 4 * record_params
-        code_len_offset = defaults + 4 * record_defaults
-        code_len = struct.unpack_from("<I", payload, code_len_offset)[0]
+        record = read_function_record(payload, pos)
 
-        if record_params == num_params:
-            return {
-                "num_defaults": pos + 8,
-                "param_names": param_names,
-                "defaults": defaults,
-            }
+        if record["num_params"] == num_params:
+            return record
 
-        pos = code_len_offset + 4 + code_len
+        pos = record["next"]
 
     raise RuntimeError(f"no function with {num_params} params")
 
@@ -452,11 +480,11 @@ def main():
         ))
 
         tests.append((
-            "bad_default_const_index",
+            "posonly_exceeds_params",
             lambda: mutate_kw(
-                "bad_default_const_index",
-                record["defaults"],
-                (0xFFFFFFFF).to_bytes(4, "little"),
+                "posonly_exceeds_params",
+                record["posonly_count"],
+                (3).to_bytes(2, "little"),
             ),
         ))
 

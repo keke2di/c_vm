@@ -120,15 +120,15 @@ static char *pad_and_finish(const char *body, size_t body_len, size_t prefix_len
     return out;
 }
 
-static char *group_decimal(const char *digits, size_t len, char sep, size_t *out_len) {
-    size_t groups = (len - 1) / 3;
+static char *group_digits(const char *digits, size_t len, char sep, size_t group, size_t *out_len) {
+    size_t groups = (len - 1) / group;
     size_t total = len + groups;
     char *out = malloc(total + 1);
     if (!out) return NULL;
 
     size_t o = 0;
     for (size_t i = 0; i < len; i++) {
-        if (i > 0 && (len - i) % 3 == 0) {
+        if (i > 0 && (len - i) % group == 0) {
             out[o++] = sep;
         }
         out[o++] = digits[i];
@@ -162,7 +162,7 @@ static char *format_integer(int64_t value, const FormatSpec *fs, size_t *out_len
         default: *err = 1; return NULL;
     }
 
-    if (fs->grouping && base != 10) {
+    if (fs->grouping && base != 10 && fs->grouping != '_') {
         *err = 1;
         return NULL;
     }
@@ -187,17 +187,6 @@ static char *format_integer(int64_t value, const FormatSpec *fs, size_t *out_len
         digits[dlen - 1 - i] = t;
     }
 
-    char *grouped = NULL;
-    const char *body_digits = digits;
-    size_t body_digits_len = dlen;
-    if (fs->grouping && base == 10) {
-        size_t glen = 0;
-        grouped = group_decimal(digits, dlen, fs->grouping, &glen);
-        if (!grouped) { *err = 1; return NULL; }
-        body_digits = grouped;
-        body_digits_len = glen;
-    }
-
     char sign_char = 0;
     if (value < 0) {
         sign_char = '-';
@@ -209,10 +198,49 @@ static char *format_integer(int64_t value, const FormatSpec *fs, size_t *out_len
 
     size_t prefix_len = fs->alt ? strlen(prefix) : 0;
     size_t sign_len = sign_char ? 1 : 0;
+
+    size_t group = base == 10 ? 3 : 4;
+    char *padded = NULL;
+    const char *digit_text = digits;
+    size_t digit_text_len = dlen;
+
+    if (fs->grouping && fs->zero) {
+        size_t available = 0;
+        if (fs->width > (int)(sign_len + prefix_len)) {
+            available = (size_t)fs->width - sign_len - prefix_len;
+        }
+
+        size_t wanted = dlen;
+        while (wanted + (wanted - 1) / group < available) {
+            wanted++;
+        }
+
+        if (wanted > dlen) {
+            padded = malloc(wanted + 1);
+            if (!padded) { *err = 1; return NULL; }
+            memset(padded, '0', wanted - dlen);
+            memcpy(padded + (wanted - dlen), digits, dlen);
+            padded[wanted] = '\0';
+            digit_text = padded;
+            digit_text_len = wanted;
+        }
+    }
+
+    char *grouped = NULL;
+    const char *body_digits = digit_text;
+    size_t body_digits_len = digit_text_len;
+    if (fs->grouping) {
+        size_t glen = 0;
+        grouped = group_digits(digit_text, digit_text_len, fs->grouping, group, &glen);
+        if (!grouped) { free(padded); *err = 1; return NULL; }
+        body_digits = grouped;
+        body_digits_len = glen;
+    }
+
     size_t total = sign_len + prefix_len + body_digits_len;
 
     char *body = malloc(total + 1);
-    if (!body) { free(grouped); *err = 1; return NULL; }
+    if (!body) { free(grouped); free(padded); *err = 1; return NULL; }
 
     size_t o = 0;
     if (sign_char) body[o++] = sign_char;
@@ -222,6 +250,7 @@ static char *format_integer(int64_t value, const FormatSpec *fs, size_t *out_len
     body[o] = '\0';
 
     free(grouped);
+    free(padded);
 
     char *out = pad_and_finish(body, o, sign_len + prefix_len, fs, '>', out_len);
     free(body);
@@ -277,15 +306,49 @@ static char *format_float(double value, const FormatSpec *fs, size_t *out_len, i
 
     size_t mag_len = strlen(magnitude);
     size_t sign_len = sign_char ? 1 : 0;
-    size_t total = sign_len + mag_len;
+
+    char *grouped = NULL;
+    const char *body_text = magnitude;
+    size_t body_text_len = mag_len;
+
+    if (fs->grouping && mag_len > 0 && !strchr(magnitude, 'e') && !strchr(magnitude, 'E')) {
+        size_t int_len = 0;
+        while (int_len < mag_len && magnitude[int_len] >= '0' && magnitude[int_len] <= '9') {
+            int_len++;
+        }
+
+        if (int_len == 0) {
+            int_len = mag_len;
+        }
+
+        size_t glen = 0;
+        grouped = group_digits(magnitude, int_len, fs->grouping, 3, &glen);
+        if (!grouped) { *err = 1; return NULL; }
+
+        size_t rest = mag_len - int_len;
+        char *joined = malloc(glen + rest + 1);
+        if (!joined) { free(grouped); *err = 1; return NULL; }
+
+        memcpy(joined, grouped, glen);
+        memcpy(joined + glen, magnitude + int_len, rest);
+        joined[glen + rest] = '\0';
+        free(grouped);
+        grouped = joined;
+        body_text = grouped;
+        body_text_len = glen + rest;
+    }
+
+    size_t total = sign_len + body_text_len;
 
     char *body = malloc(total + 1);
-    if (!body) { *err = 1; return NULL; }
+    if (!body) { free(grouped); *err = 1; return NULL; }
     size_t o = 0;
     if (sign_char) body[o++] = sign_char;
-    memcpy(body + o, magnitude, mag_len);
-    o += mag_len;
+    memcpy(body + o, body_text, body_text_len);
+    o += body_text_len;
     body[o] = '\0';
+
+    free(grouped);
 
     char *out = pad_and_finish(body, o, sign_len, fs, '>', out_len);
     free(body);

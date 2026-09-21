@@ -92,12 +92,12 @@ python tests/run_all.py
 
 | Suite | Covers | Tests |
 |:------|:-------|------:|
-| `tests/run_examples.py` | Compiles, packs, and runs every program in `examples/`, comparing output against CPython | 112 |
-| `tests/test_compiler_errors.py` | Unsupported or invalid source is rejected with the expected error | 18 |
+| `tests/run_examples.py` | Compiles, packs, and runs every program in `examples/`, comparing output against CPython with `PYTHONHASHSEED=0` and object addresses normalized | 123 |
+| `tests/test_compiler_errors.py` | Unsupported or invalid source is rejected with the expected error | 12 |
 | `tests/test_container_errors.py` | Malformed CVM2 containers are rejected | 14 |
 | `tests/test_arithmetic_errors.py` | Integer overflow is reported | 7 |
-| `tests/test_runtime_errors.py` | Call, value, and runtime errors are reported | 98 |
-| `tests/runtime_stress.py` | Deep recursion and large collections | 5 |
+| `tests/test_runtime_errors.py` | Call, value, binding, and runtime errors are reported as the right exception with a traceback | 140 |
+| `tests/runtime_stress.py` | Deep recursion, large collections, and large dict/set workloads | 8 |
 | `tests/test_stub.py` | The packed executable imports only KERNEL32, uses no temp file, and matches CPython | 5 |
 
 Each suite can also run on its own. Pass `--quiet` to print only failures and the summary line.

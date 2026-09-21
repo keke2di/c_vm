@@ -38,36 +38,20 @@ int vm_init_callable_globals(VM *vm) {
         return vm->last_error;
     }
 
-    for (uint32_t i = 0; i < vm->num_functions; i++) {
-        if (i == vm->entry_func_index) {
-            continue;
-        }
-
-        uint32_t name_index = vm->functions[i].name_index;
-        if (name_index >= vm->num_names) {
-            vm->last_error = VM_ERR_BOUNDS;
-            return vm->last_error;
-        }
-
-        if (vm_install_callable(vm, name_index, FUNC_USER, i) != VM_ERR_OK) {
-            return vm->last_error;
-        }
-    }
-
     return VM_ERR_OK;
 }
 
-static int32_t vm_param_slot(const VM *vm, const FuncEntry *func, const Value *name) {
-    if (!name || name->tag != TAG_STRING) {
-        return -1;
-    }
+static int name_matches(const char *text, const Value *name) {
+    size_t len = strlen(text);
 
-    for (uint32_t i = 0; i < func->params_count; i++) {
-        const char *param = vm->names[func->param_names[i]];
-        size_t param_len = strlen(param);
+    return name && name->tag == TAG_STRING &&
+           name->data.str.len == len &&
+           memcmp(text, name->data.str.data, len) == 0;
+}
 
-        if (param_len == name->data.str.len &&
-            memcmp(param, name->data.str.data, param_len) == 0) {
+static int32_t keyword_slot(const VM *vm, const FuncEntry *func, const Value *name) {
+    for (uint32_t i = func->posonly_count; i < func->params_count; i++) {
+        if (name_matches(vm->names[func->param_names[i]], name)) {
             return (int32_t)i;
         }
     }
@@ -75,25 +59,45 @@ static int32_t vm_param_slot(const VM *vm, const FuncEntry *func, const Value *n
     return -1;
 }
 
-static void vm_call_user(VM *vm, uint32_t func_index, uint32_t nargs, const Value *kwnames) {
-    if (func_index >= vm->num_functions) {
+static int32_t kwonly_keyword_slot(const VM *vm, const FuncEntry *func, const Value *name) {
+    for (uint32_t i = 0; i < func->kwonly_count; i++) {
+        if (name_matches(vm->names[func->kwonly_names[i]], name)) {
+            return (int32_t)i;
+        }
+    }
+
+    return -1;
+}
+
+static void release_locals(Value **locals, uint32_t count) {
+    if (!locals) return;
+
+    for (uint32_t i = 0; i < count; i++) {
+        if (locals[i]) value_release(locals[i]);
+    }
+    free(locals);
+}
+
+static void vm_call_user(VM *vm, Function *fn, Value **args, uint32_t nargs, const Value *kwnames) {
+    if (!fn || fn->index >= vm->num_functions) {
         vm->last_error = VM_ERR_FUNC_NOT_FOUND;
         return;
     }
+
+    FuncEntry *func = &vm->functions[fn->index];
 
     uint32_t call_depth = 0;
     for (Frame *f = vm->current_frame; f != NULL; f = f->prev) {
         call_depth++;
         if (call_depth >= MAX_CALL_DEPTH) {
-            vm->last_error = VM_ERR_STACK;
+            vm->last_error = VM_ERR_RECURSION;
             return;
         }
     }
 
-    FuncEntry *func = &vm->functions[func_index];
     uint32_t nkw = kwnames ? kwnames->data.tuple.len : 0;
 
-    if (nkw > nargs || nargs - nkw > func->params_count) {
+    if (nkw > nargs) {
         vm->last_error = VM_ERR_TYPE;
         return;
     }
@@ -111,32 +115,176 @@ static void vm_call_user(VM *vm, uint32_t func_index, uint32_t nargs, const Valu
     }
 
     int err = VM_ERR_OK;
-    uint32_t base = vm->stack_top - nargs;
+    uint32_t positional = func->params_count;
+    uint32_t supplied = npos < positional ? npos : positional;
 
-    for (uint32_t i = 0; i < npos; i++) {
-        locals[i] = value_retain(vm->stack[base + i]);
+    for (uint32_t i = 0; i < supplied; i++) {
+        locals[i] = value_retain(args[i]);
     }
+
+    if (npos > positional && func->vararg_slot == UINT32_MAX) {
+        err = VM_ERR_TYPE;
+    }
+
+    if (err == VM_ERR_OK && func->vararg_slot != UINT32_MAX) {
+        uint32_t extra_count = npos > positional ? npos - positional : 0;
+        Value *rest = value_new_tuple(extra_count);
+
+        if (!rest) {
+            err = VM_ERR_OOM;
+        } else {
+            for (uint32_t i = 0; i < extra_count; i++) {
+                rest->data.tuple.items[i] = value_retain(args[positional + i]);
+            }
+            locals[func->vararg_slot] = rest;
+        }
+    }
+
+    Value *extra = NULL;
 
     for (uint32_t k = 0; err == VM_ERR_OK && k < nkw; k++) {
-        int32_t slot = vm_param_slot(vm, func, kwnames->data.tuple.items[k]);
-        if (slot < 0 || locals[slot]) {
+        const Value *name = kwnames->data.tuple.items[k];
+        Value *value = args[npos + k];
+
+        if (!name || name->tag != TAG_STRING) {
             err = VM_ERR_TYPE;
-        } else {
-            locals[slot] = value_retain(vm->stack[base + npos + k]);
+            break;
+        }
+
+        int32_t slot = keyword_slot(vm, func, name);
+
+        if (slot >= 0) {
+            if ((uint32_t)slot < supplied) {
+                err = VM_ERR_TYPE;
+                break;
+            }
+            locals[slot] = value_retain(value);
+            continue;
+        }
+
+        int32_t kslot = kwonly_keyword_slot(vm, func, name);
+
+        if (kslot >= 0) {
+            uint32_t target = func->kwonly_slots[kslot];
+            if (locals[target]) {
+                err = VM_ERR_TYPE;
+                break;
+            }
+            locals[target] = value_retain(value);
+            continue;
+        }
+
+        if (func->kwarg_slot == UINT32_MAX) {
+            err = VM_ERR_TYPE;
+            break;
+        }
+
+        if (!extra) {
+            extra = value_new_dict();
+            if (!extra) {
+                err = VM_ERR_OOM;
+                break;
+            }
+        }
+
+        if (value_dict_set(extra, (Value *)name, value) != 0) {
+            err = VM_ERR_TYPE;
+            break;
         }
     }
 
-    uint32_t first_default = func->params_count - func->defaults_count;
+    uint32_t first_default = positional - func->defaults_count;
 
-    for (uint32_t i = 0; err == VM_ERR_OK && i < func->params_count; i++) {
-        if (locals[i]) {
-            continue;
-        }
+    for (uint32_t i = 0; err == VM_ERR_OK && i < positional; i++) {
+        if (locals[i]) continue;
+
         if (i < first_default) {
             err = VM_ERR_TYPE;
-        } else {
-            locals[i] = value_retain(vm->constants[func->default_consts[i - first_default]]);
+            break;
         }
+
+        Value *fallback = value_tuple_get(fn->defaults, i - first_default);
+        if (!fallback) {
+            err = VM_ERR_TYPE;
+            break;
+        }
+        locals[i] = value_retain(fallback);
+    }
+
+    for (uint32_t i = 0; err == VM_ERR_OK && i < func->kwonly_count; i++) {
+        uint32_t target = func->kwonly_slots[i];
+
+        if (locals[target]) continue;
+        if (!func->kwonly_flags[i]) {
+            err = VM_ERR_TYPE;
+            break;
+        }
+
+        Value key;
+        memset(&key, 0, sizeof(key));
+        key.tag = TAG_STRING;
+        key.refcount = UINT32_MAX;
+        key.data.str.data = (char *)vm->names[func->kwonly_names[i]];
+        key.data.str.len = (uint32_t)strlen(key.data.str.data);
+
+        Value *stored = fn->kwdefaults ? value_dict_get(fn->kwdefaults, &key) : NULL;
+        if (!stored) {
+            err = VM_ERR_TYPE;
+            break;
+        }
+
+        locals[target] = value_retain(stored);
+    }
+
+    if (err == VM_ERR_OK && func->kwarg_slot != UINT32_MAX) {
+        if (!extra) {
+            extra = value_new_dict();
+            if (!extra) err = VM_ERR_OOM;
+        }
+
+        if (err == VM_ERR_OK) {
+            locals[func->kwarg_slot] = extra;
+            extra = NULL;
+        }
+    }
+
+    if (extra) value_release(extra);
+
+    uint32_t total_cells = func->cells_count + func->frees_count;
+    Value **cells = NULL;
+
+    if (err == VM_ERR_OK && total_cells > 0) {
+        cells = calloc(total_cells, sizeof(Value *));
+        if (!cells) {
+            err = VM_ERR_OOM;
+        }
+    }
+
+    for (uint32_t i = 0; err == VM_ERR_OK && i < func->cells_count; i++) {
+        cells[i] = value_new_cell();
+        if (!cells[i]) err = VM_ERR_OOM;
+    }
+
+    for (uint32_t i = 0; err == VM_ERR_OK && i < func->cells_count; i++) {
+        uint32_t slot = func->cell_slots[i];
+
+        if (slot >= locals_cap) {
+            err = VM_ERR_BOUNDS;
+            break;
+        }
+
+        if (locals[slot]) {
+            value_cell_set(cells[i], locals[slot]);
+            locals[slot] = NULL;
+        }
+    }
+
+    for (uint32_t i = 0; err == VM_ERR_OK && i < func->frees_count; i++) {
+        if (!fn->cells || i >= fn->ncells || !fn->cells[i]) {
+            err = VM_ERR_TYPE;
+            break;
+        }
+        cells[func->cells_count + i] = value_retain(fn->cells[i]);
     }
 
     Frame *new_frame = NULL;
@@ -149,17 +297,15 @@ static void vm_call_user(VM *vm, uint32_t func_index, uint32_t nargs, const Valu
     }
 
     if (err != VM_ERR_OK) {
-        for (uint32_t i = 0; i < locals_cap; i++) {
-            if (locals[i]) value_release(locals[i]);
+        if (cells) {
+            for (uint32_t i = 0; i < total_cells; i++) {
+                if (cells[i]) value_release(cells[i]);
+            }
+            free(cells);
         }
-        free(locals);
+        release_locals(locals, locals_cap);
         vm->last_error = err;
         return;
-    }
-
-    while (vm->stack_top > base) {
-        Value *arg = vm_pop(vm);
-        if (arg) value_release(arg);
     }
 
     VM_DEBUG(
@@ -174,6 +320,11 @@ static void vm_call_user(VM *vm, uint32_t func_index, uint32_t nargs, const Valu
     new_frame->func = func;
     new_frame->locals_cap = locals_cap;
     new_frame->locals = locals;
+    new_frame->cells = cells;
+    new_frame->cells_cap = total_cells;
+    new_frame->handlers = NULL;
+    new_frame->handler_count = 0;
+    new_frame->handler_cap = 0;
     new_frame->stack_base = vm->stack_top;
     vm->current_frame = new_frame;
     vm->ip = vm->bytecode + func->code_offset;
@@ -216,6 +367,36 @@ static void push_result(VM *vm, Value *result) {
     vm_push_owned(vm, result);
 }
 
+static void vm_invoke(VM *vm, Value *callable, Value **args, uint32_t nargs, const Value *kwnames) {
+    NativeFn native = NULL;
+
+    if (callable && callable->tag == TAG_FUNCTION && callable->data.func) {
+        if (callable->data.func->kind == FUNC_USER) {
+            vm_call_user(vm, callable->data.func, args, nargs, kwnames);
+            return;
+        }
+        native = builtin_function(callable->data.func->index);
+    } else if (callable && callable->tag == TAG_TYPE) {
+        int type_id = (int)callable->data.int_val;
+
+        if (exception_index_of(type_id) >= 0) {
+            Value *result = construct_exception(vm, (uint32_t)type_id, args, nargs, kwnames);
+            push_result(vm, result);
+            return;
+        }
+
+        native = type_constructor(type_id);
+    }
+
+    if (!native) {
+        vm->last_error = VM_ERR_TYPE;
+        return;
+    }
+
+    Value *result = native(vm, args, nargs, kwnames);
+    push_result(vm, result);
+}
+
 void vm_call_value(VM *vm, uint32_t nargs, const Value *kwnames) {
     uint32_t frame_base = vm->current_frame ? vm->current_frame->stack_base : 0;
     if (vm->stack_top < frame_base || vm->stack_top - frame_base <= nargs) {
@@ -225,40 +406,177 @@ void vm_call_value(VM *vm, uint32_t nargs, const Value *kwnames) {
 
     uint32_t callable_pos = vm->stack_top - nargs - 1;
     Value *callable = vm->stack[callable_pos];
-    NativeFn native = NULL;
 
-    if (callable->tag == TAG_FUNCTION && callable->data.func) {
-        if (callable->data.func->kind == FUNC_USER) {
-            uint32_t index = callable->data.func->index;
-            memmove(
-                &vm->stack[callable_pos],
-                &vm->stack[callable_pos + 1],
-                nargs * sizeof(Value*));
-            vm->stack_top--;
-            value_release(callable);
-            vm_call_user(vm, index, nargs, kwnames);
+    Value *small[SMALL_ARGS];
+    Value **args = NULL;
+
+    if (nargs > 0) {
+        args = nargs > SMALL_ARGS ? malloc(nargs * sizeof(Value *)) : small;
+        if (!args) {
+            vm->last_error = VM_ERR_OOM;
             return;
         }
-        native = builtin_function(callable->data.func->index);
-    } else if (callable->tag == TAG_TYPE) {
-        native = type_constructor((int)callable->data.int_val);
+        for (uint32_t i = 0; i < nargs; i++) {
+            args[i] = vm->stack[callable_pos + 1 + i];
+        }
     }
 
-    if (!native) {
+    vm->stack_top = callable_pos;
+    vm_invoke(vm, callable, args, nargs, kwnames);
+
+    drop_args(args ? args : small, nargs, small);
+    value_release(callable);
+}
+
+void vm_call_ex(VM *vm) {
+    Value *kwargs = vm_pop(vm);
+    Value *args = vm_pop(vm);
+    Value *callable = vm_pop(vm);
+
+    if (!callable) {
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    uint32_t npos = 0;
+    uint32_t nkw = 0;
+
+    if (args && args->tag != TAG_NONE) {
+        int64_t len = value_length(args);
+        if (len < 0) {
+            vm->last_error = VM_ERR_TYPE;
+            goto done;
+        }
+        npos = (uint32_t)len;
+    }
+
+    if (kwargs && kwargs->tag != TAG_NONE) {
+        if (kwargs->tag != TAG_DICT) {
+            vm->last_error = VM_ERR_TYPE;
+            goto done;
+        }
+        nkw = kwargs->data.dict.len;
+    }
+
+    uint32_t nargs = npos + nkw;
+    Value *small[SMALL_ARGS];
+    Value **values = NULL;
+
+    if (nargs > 0) {
+        values = nargs > SMALL_ARGS ? malloc(nargs * sizeof(Value *)) : small;
+        if (!values) {
+            vm->last_error = VM_ERR_OOM;
+            goto done;
+        }
+    }
+
+    for (uint32_t i = 0; i < npos; i++) {
+        Value *item = value_item_at(args, (int64_t)i);
+        if (!item) {
+            vm->last_error = VM_ERR_TYPE;
+            drop_args(values, nargs, small);
+            goto done;
+        }
+        values[i] = item;
+    }
+
+    Value *kwnames = NULL;
+
+    if (nkw > 0) {
+        kwnames = value_new_tuple(nkw);
+        if (!kwnames) {
+            vm->last_error = VM_ERR_OOM;
+            drop_args(values, nargs, small);
+            goto done;
+        }
+
+        for (uint32_t i = 0; i < nkw; i++) {
+            Value *key = value_dict_key_at(kwargs, i);
+            kwnames->data.tuple.items[i] = value_retain(key);
+            values[npos + i] = value_retain(value_dict_get(kwargs, key));
+        }
+    }
+
+    vm_invoke(vm, callable, values, nargs, kwnames);
+
+    drop_args(values, nargs, small);
+    if (kwnames) value_release(kwnames);
+
+done:
+    if (args) value_release(args);
+    if (kwargs) value_release(kwargs);
+    value_release(callable);
+}
+
+void vm_make_function(VM *vm, uint32_t func_index) {
+    Value *closure = vm_pop(vm);
+    Value *kwdefaults = vm_pop(vm);
+    Value *defaults = vm_pop(vm);
+
+    if (!closure || !kwdefaults || !defaults) {
+        if (closure) value_release(closure);
+        if (kwdefaults) value_release(kwdefaults);
+        if (defaults) value_release(defaults);
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    if (func_index >= vm->num_functions ||
+        closure->tag != TAG_TUPLE ||
+        defaults->tag != TAG_TUPLE ||
+        (kwdefaults->tag != TAG_DICT && kwdefaults->tag != TAG_NONE)) {
+        value_release(closure);
+        value_release(kwdefaults);
+        value_release(defaults);
         vm->last_error = VM_ERR_TYPE;
         return;
     }
 
-    Value *small[SMALL_ARGS];
-    Value **args = take_args(vm, nargs, small);
-    if (!args) return;
+    FuncEntry *func = &vm->functions[func_index];
 
-    Value *callee = vm_pop(vm);
-    Value *result = native(vm, args, nargs, kwnames);
+    if (closure->data.tuple.len != func->frees_count ||
+        defaults->data.tuple.len != func->defaults_count) {
+        value_release(closure);
+        value_release(kwdefaults);
+        value_release(defaults);
+        vm->last_error = VM_ERR_TYPE;
+        return;
+    }
 
-    drop_args(args, nargs, small);
-    value_release(callee);
-    push_result(vm, result);
+    Value *fn = value_new_function(FUNC_USER, func_index, vm->names[func->name_index]);
+
+    if (!fn) {
+        value_release(closure);
+        value_release(kwdefaults);
+        value_release(defaults);
+        vm->last_error = VM_ERR_OOM;
+        return;
+    }
+
+    fn->data.func->defaults = value_retain(defaults);
+    fn->data.func->kwdefaults =
+        kwdefaults->tag == TAG_DICT ? value_retain(kwdefaults) : NULL;
+
+    if (func->frees_count > 0) {
+        fn->data.func->cells = malloc(func->frees_count * sizeof(Value *));
+        if (!fn->data.func->cells) {
+            value_release(fn);
+            value_release(closure);
+            value_release(kwdefaults);
+            value_release(defaults);
+            vm->last_error = VM_ERR_OOM;
+            return;
+        }
+        fn->data.func->ncells = func->frees_count;
+        for (uint32_t i = 0; i < func->frees_count; i++) {
+            fn->data.func->cells[i] = value_retain(closure->data.tuple.items[i]);
+        }
+    }
+
+    value_release(closure);
+    value_release(kwdefaults);
+    value_release(defaults);
+    vm_push_owned(vm, fn);
 }
 
 void vm_call_method(VM *vm, uint32_t nargs, int has_kwnames) {
@@ -317,11 +635,20 @@ int vm_call_sync(VM *vm, Value *callable, Value **args, uint32_t nargs, Value **
         return -1;
     }
 
-    while (vm->last_error == VM_ERR_OK && vm->current_frame != saved_frame) {
+    while (vm->current_frame != saved_frame) {
+        if (vm->last_error != VM_ERR_OK) {
+            if (!vm_unwind_to(vm, saved_frame)) {
+                vm->ip = saved_ip;
+                return -1;
+            }
+            continue;
+        }
+
         if (vm->ip >= vm->bytecode + vm->bytecode_len) {
             vm->last_error = VM_ERR_BOUNDS;
-            break;
+            continue;
         }
+
         vm_step(vm);
     }
 

@@ -114,7 +114,7 @@ def main():
                 failed += 1
                 continue
 
-            if "Integer overflow" not in result.stderr:
+            if "OverflowError" not in result.stderr:
                 print(f"{name}: FAIL (wrong runtime error)")
                 if result.stderr:
                     print(result.stderr, end="")

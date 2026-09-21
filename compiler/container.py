@@ -18,12 +18,13 @@ def build_module(
     constants: ConstantPool,
     names: GlobalNames,
     entry_function: str,
+    source_name: str = "<module>",
 ) -> bytes:
     entry_idx = None
 
     for i, fn in enumerate(functions):
         names.intern(fn.name)
-        for param_name in fn.param_names:
+        for param_name in fn.param_names + fn.kwonly_names + fn.free_names:
             names.intern(param_name)
 
         if fn.name == entry_function:
@@ -41,6 +42,7 @@ def build_module(
     out += _section(0x01, const_data)
     out += _section(0x02, name_data)
     out += _section(0x03, func_data)
+    out += _section(0x04, source_name.encode("utf-8"))
 
     return bytes(out)
 
@@ -82,19 +84,49 @@ def _serialize_functions(functions: list, names: GlobalNames) -> bytes:
                 f"function {fn.name!r} parameter names do not match parameter count"
             )
 
-        if len(fn.default_consts) > fn.num_params:
+        if fn.num_defaults > fn.num_params:
             raise ContainerError(
                 f"function {fn.name!r} has more defaults than params"
+            )
+
+        if len(fn.kwonly_names) != len(fn.kwonly_flags):
+            raise ContainerError(
+                f"function {fn.name!r} keyword-only table mismatch"
             )
 
         out += struct.pack("<I", name_idx)
         out += struct.pack("<H", fn.num_locals)
         out += struct.pack("<H", fn.num_params)
-        out += struct.pack("<H", len(fn.default_consts))
+        out += struct.pack("<H", fn.posonly_count)
+        out += struct.pack("<H", fn.num_defaults)
+        out += struct.pack("<H", len(fn.kwonly_names))
+        out += struct.pack("<H", fn.vararg_slot)
+        out += struct.pack("<H", fn.kwarg_slot)
+        out += struct.pack("<H", len(fn.cell_slots))
+        out += struct.pack("<H", len(fn.free_names))
+
         for param_name in fn.param_names:
             out += struct.pack("<I", names.index(param_name))
-        for const_idx in fn.default_consts:
-            out += struct.pack("<I", const_idx)
+
+        for name in fn.kwonly_names:
+            out += struct.pack("<I", names.index(name))
+
+        for slot in fn.kwonly_slots:
+            out += struct.pack("<H", slot)
+
+        for flag in fn.kwonly_flags:
+            out += struct.pack("<B", flag)
+
+        for slot in fn.cell_slots:
+            out += struct.pack("<H", slot)
+
+        for name in fn.free_names:
+            out += struct.pack("<I", names.index(name))
+
+        out += struct.pack("<I", len(fn.line_table))
+        for offset, line in fn.line_table:
+            out += struct.pack("<II", offset, line)
+
         out += struct.pack("<I", len(fn.code))
         out += fn.code
 

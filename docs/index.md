@@ -17,7 +17,7 @@ A small Python-like language runtime: a bytecode compiler, a native C virtual ma
 ---
 
 {: .new }
-v0.3.0 completes the method surfaces: every public method of `str`, `bytes`, `list`, `dict`, `set`, and `frozenset` — 136 in all — plus `str.format`, set and dict operators, and Unicode tables generated from CPython 3.14. Modules compiled with v0.2.2 keep working without recompiling. See the [changelog](CHANGELOG.md).
+v0.4.0 adds functions, scopes, and exceptions: nested `def`, `lambda`, closures, decorators, every parameter kind, `try`/`except`/`finally` over all 68 built-in exception types, and CPython-shaped tracebacks. `hash()` now matches CPython and `dict`/`set` lookups are O(1). Modules compiled with v0.3.0 or earlier must be recompiled (container format 5). See the [changelog](CHANGELOG.md).
 
 ## What is cVM?
 
@@ -84,19 +84,19 @@ The program produces output through `print`; there is no implicit trailing outpu
 
 | | |
 |:--|:--|
-| Current release | **v0.3.0** |
+| Current release | **v0.4.0** |
 | Platform | Windows, built with MSVC |
-| CVM2 format version | 3 |
-| Test suite | 259 tests passing |
+| CVM2 format version | 5 |
+| Test suite | 309 tests passing |
 
 | Test suite | Tests |
 |:-----------|------:|
-| Examples | 112 |
-| Compiler errors | 18 |
+| Examples | 123 |
+| Compiler errors | 12 |
 | Container validation | 14 |
 | Arithmetic errors | 7 |
-| Runtime errors | 98 |
-| Runtime stress | 5 |
+| Runtime errors | 140 |
+| Runtime stress | 8 |
 | Stub | 5 |
 
 {: .warning }

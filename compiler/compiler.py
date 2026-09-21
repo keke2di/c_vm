@@ -7,7 +7,7 @@ from typing import Dict, List, Optional
 
 from .constants import ConstantPool
 from .emitter import Emitter, EmitterError
-from .symbols import GlobalNames, LocalTable, SymbolError
+from .symbols import GlobalNames, Scope, ScopeAnalyzer, SymbolError
 
 REQUIRED_PYTHON = (3, 14)
 
@@ -18,10 +18,22 @@ class CompileError(Exception):
 class CompiledFunction:
     name: str
     num_locals: int
-    num_params: int
     code: bytes
     param_names: List[str] = field(default_factory=list)
-    default_consts: List[int] = field(default_factory=list)
+    posonly_count: int = 0
+    num_defaults: int = 0
+    kwonly_names: List[str] = field(default_factory=list)
+    kwonly_slots: List[int] = field(default_factory=list)
+    kwonly_flags: List[int] = field(default_factory=list)
+    vararg_slot: int = 0xFFFF
+    kwarg_slot: int = 0xFFFF
+    cell_slots: List[int] = field(default_factory=list)
+    free_names: List[str] = field(default_factory=list)
+    line_table: List[tuple] = field(default_factory=list)
+
+    @property
+    def num_params(self) -> int:
+        return len(self.param_names)
 
 @dataclass
 class CompiledModule:
@@ -29,15 +41,20 @@ class CompiledModule:
     names: GlobalNames
     functions: List[CompiledFunction] = field(default_factory=list)
     entry_index: int = 0
+    source_name: str = "<module>"
 
 class Compiler:
     def __init__(self) -> None:
         self.constants = ConstantPool()
         self.names = GlobalNames()
-        self.functions: List[CompiledFunction] = []
-        self._func_index: Dict[str, int] = {}
+        self.functions: List[Optional[CompiledFunction]] = []
+        self._func_index: Dict[int, int] = {}
         self._defined_functions: set[str] = set()
         self._rebound_names: set[str] = set()
+        self.analyzer = ScopeAnalyzer()
+        self.module_scope: Optional[Scope] = None
+        self.entry_index = 0
+        self.source_name = "<module>"
 
     def compile_module(self, source: str, filename: str = "<module>") -> CompiledModule:
         if tuple(sys.version_info[:2]) != REQUIRED_PYTHON:
@@ -46,8 +63,9 @@ class Compiler:
                 f"running {sys.version_info[0]}.{sys.version_info[1]}"
             )
         tree = ast.parse(source, filename=filename)
+        self.source_name = filename
         self._defined_functions = {
-            node.name for node in tree.body if isinstance(node, ast.FunctionDef)
+            node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
         }
         self._rebound_names = {
             node.id
@@ -60,86 +78,220 @@ class Compiler:
             if isinstance(node, ast.arguments)
             for arg in node.posonlyargs + node.args + node.kwonlyargs
         )
-        module_body: List[ast.stmt] = []
-        for node in tree.body:
-            if isinstance(node, ast.FunctionDef):
-                self._compile_function(node)
-            else:
-                module_body.append(node)
-        entry = ast.FunctionDef(
-            name="__main__",
-            args=ast.arguments(posonlyargs=[], args=[], vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
-            body=module_body or [ast.Pass()],
-            decorator_list=[],
-            returns=None,
-            type_comment=None,
-        )
-        ast.fix_missing_locations(entry)
-        self._compile_function(entry)
-        module = CompiledModule(constants=self.constants, names=self.names, functions=self.functions)
-        module.entry_index = self._func_index["__main__"]
-        return module
 
-    def _compile_function(self, node: ast.FunctionDef) -> None:
-        if node.name in self._func_index:
-            raise CompileError(f"duplicate function: {node.name}")
-        args = node.args
-        if node.decorator_list:
-            raise CompileError("decorators are not supported yet")
-        if getattr(node, "type_params", None):
-            raise CompileError("type parameters are not supported")
-        if args.vararg is not None:
-            raise CompileError("*args parameters are not supported yet")
-        if args.kwarg is not None:
-            raise CompileError("**kwargs parameters are not supported yet")
-        if args.kwonlyargs:
-            raise CompileError("keyword-only parameters are not supported yet")
-        if args.posonlyargs:
-            raise CompileError("positional-only parameters are not supported yet")
-        param_names = [arg.arg for arg in args.args]
-        if len(set(param_names)) != len(param_names):
-            raise CompileError(f"duplicate parameter name in function {node.name}")
-        default_consts = [
-            self.constants.add(_constant_default(default))
-            for default in args.defaults
-        ]
-        locals_tbl = LocalTable(node.name)
-        for param_name in param_names:
-            locals_tbl.declare(param_name)
-        emitter = Emitter(node.name)
+        self.analyzer = ScopeAnalyzer()
+        self.module_scope = self.analyzer.analyze_module(tree)
+
+        nested: List = []
+
+        def collect(node) -> None:
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp)):
+                    nested.append(child)
+                collect(child)
+
+        collect(tree)
+
+        for node in nested:
+            self._func_index[id(node)] = len(self.functions)
+            self.functions.append(None)
+
+        self.entry_index = len(self.functions)
+        self.functions.append(None)
+
+        for node in nested:
+            self.functions[self._func_index[id(node)]] = self._compile_function_node(node)
+
+        entry_scope = self.module_scope
+        emitter = Emitter("__main__")
         ctx = _FuncCtx(
             emitter=emitter,
-            locals=locals_tbl,
+            locals=entry_scope,
             compiler=self,
             loop_stack=[],
-            is_module=(node.name == "__main__"),
+            is_module=True,
         )
-        for stmt in node.body:
+        for stmt in tree.body:
             _compile_stmt(ctx, stmt)
         emitter.emit("LOAD_CONST", self.constants.add(None))
         emitter.emit("RETURN_VALUE")
-        code = emitter.finalize()
-        idx = len(self.functions)
-        self.functions.append(CompiledFunction(
-            name=node.name,
-            num_locals=locals_tbl.count(),
-            num_params=len(param_names),
-            code=code,
+
+        self.functions[self.entry_index] = CompiledFunction(
+            name="__main__",
+            num_locals=entry_scope.count(),
+            code=emitter.finalize(),
+            line_table=list(emitter.line_table),
+        )
+
+        module = CompiledModule(
+            constants=self.constants, names=self.names, functions=self.functions
+        )
+        module.source_name = self.source_name
+        module.entry_index = self.entry_index
+        return module
+
+    def _compile_function_node(self, node) -> CompiledFunction:
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp)):
+            return self._compile_comprehension_node(node)
+        return self._compile_body_function(node)
+
+    def _compile_body_function(self, node) -> CompiledFunction:
+        args = node.args
+        if getattr(node, "type_params", None):
+            raise CompileError("type parameters are not supported")
+        is_lambda = isinstance(node, ast.Lambda)
+        name = "<lambda>" if is_lambda else node.name
+        scope = self.analyzer.scope_for(node)
+
+        all_params = [arg.arg for arg in args.posonlyargs + args.args + args.kwonlyargs]
+        if args.vararg is not None:
+            all_params.append(args.vararg.arg)
+        if args.kwarg is not None:
+            all_params.append(args.kwarg.arg)
+        if len(set(all_params)) != len(all_params):
+            raise CompileError(f"duplicate parameter name in function {name}")
+
+        param_names = [arg.arg for arg in args.posonlyargs + args.args]
+        kwonly_names = [arg.arg for arg in args.kwonlyargs]
+
+        emitter = Emitter(name)
+        ctx = _FuncCtx(
+            emitter=emitter,
+            locals=scope,
+            compiler=self,
+            loop_stack=[],
+            is_module=False,
+        )
+        if is_lambda:
+            _compile_expr(ctx, node.body)
+            emitter.emit("RETURN_VALUE")
+        else:
+            for stmt in node.body:
+                _compile_stmt(ctx, stmt)
+            emitter.emit("LOAD_CONST", self.constants.add(None))
+            emitter.emit("RETURN_VALUE")
+
+        def slot_of(param_name: str) -> int:
+            if param_name not in scope.local_index:
+                raise CompileError(f"parameter {param_name!r} has no slot")
+            return scope.local_index[param_name]
+
+        return CompiledFunction(
+            name=name,
+            num_locals=scope.count(),
+            code=emitter.finalize(),
+            line_table=list(emitter.line_table),
             param_names=param_names,
-            default_consts=default_consts,
-        ))
-        self._func_index[node.name] = idx
+            posonly_count=len(args.posonlyargs),
+            num_defaults=len(args.defaults),
+            kwonly_names=kwonly_names,
+            kwonly_slots=[slot_of(name) for name in kwonly_names],
+            kwonly_flags=[0 if default is None else 1 for default in args.kw_defaults],
+            vararg_slot=0xFFFF if args.vararg is None else slot_of(args.vararg.arg),
+            kwarg_slot=0xFFFF if args.kwarg is None else slot_of(args.kwarg.arg),
+            cell_slots=[slot_of(name) for name in scope.cell_names],
+            free_names=list(scope.frees),
+        )
+
+    def _compile_comprehension_node(self, node) -> CompiledFunction:
+        scope = self.analyzer.scope_for(node)
+        emitter = Emitter("<comp>")
+        ctx = _FuncCtx(
+            emitter=emitter,
+            locals=scope,
+            compiler=self,
+            loop_stack=[],
+            is_module=False,
+        )
+        _compile_comprehension_body(ctx, node)
+        return CompiledFunction(
+            name="<comp>",
+            num_locals=scope.count(),
+            code=emitter.finalize(),
+            line_table=list(emitter.line_table),
+            param_names=[".0"],
+            cell_slots=[scope.local_index[name] for name in scope.cell_names],
+            free_names=list(scope.frees),
+        )
 
 @dataclass
 class _FuncCtx:
     emitter: Emitter
-    locals: LocalTable
+    locals: Scope
     compiler: "Compiler"
     loop_stack: list
     is_module: bool = False
     iter_depth: int = 0
+    temp_seq: int = 0
+    handler_depth: int = 0
+    except_depth: int = 0
+    finally_stack: list = field(default_factory=list)
+
+def _emit_exit_cleanup(ctx: _FuncCtx, handler_depth: int, except_depth: int) -> None:
+    for _ in range(ctx.except_depth - except_depth):
+        ctx.emitter.emit("EXCEPT_CLEAR")
+
+    for _ in range(ctx.handler_depth - handler_depth):
+        ctx.emitter.emit("POP_HANDLER")
+
+def _emit_active_finally(ctx: _FuncCtx, final_depth: int) -> None:
+    if len(ctx.finally_stack) <= final_depth:
+        return
+
+    pending = list(ctx.finally_stack[final_depth:])
+    outer = list(ctx.finally_stack[:final_depth])
+
+    del ctx.finally_stack[:]
+    ctx.finally_stack.extend(outer)
+
+    try:
+        for body in reversed(pending):
+            for stmt in body:
+                _compile_stmt(ctx, stmt)
+    finally:
+        del ctx.finally_stack[:]
+        ctx.finally_stack.extend(outer + pending)
+
+def _emit_load_name(ctx: _FuncCtx, name: str) -> None:
+    kind, slot = ctx.locals.resolve(name)
+
+    if kind == "local":
+        ctx.emitter.emit("LOAD_FAST", slot)
+    elif kind in ("cell", "free"):
+        ctx.emitter.emit("LOAD_DEREF", slot)
+    else:
+        ctx.emitter.emit("LOAD_GLOBAL", ctx.compiler.names.intern(name))
+
+def _emit_store_name(ctx: _FuncCtx, name: str) -> None:
+    kind, slot = ctx.locals.resolve(name)
+
+    if kind == "local":
+        ctx.emitter.emit("STORE_FAST", slot)
+    elif kind in ("cell", "free"):
+        ctx.emitter.emit("STORE_DEREF", slot)
+    else:
+        ctx.emitter.emit("STORE_GLOBAL", ctx.compiler.names.intern(name))
+
+def _emit_delete_name(ctx: _FuncCtx, name: str) -> None:
+    kind, slot = ctx.locals.resolve(name)
+
+    if kind == "local":
+        ctx.emitter.emit("DELETE_FAST", slot)
+    elif kind in ("cell", "free"):
+        ctx.emitter.emit("DELETE_DEREF", slot)
+    else:
+        ctx.emitter.emit("DELETE_GLOBAL", ctx.compiler.names.intern(name))
 
 def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
+    line = getattr(node, "lineno", None)
+    if line:
+        ctx.emitter.current_line = line
+
+    if isinstance(node, ast.FunctionDef):
+        _compile_function_def(ctx, node)
+        return
+    if isinstance(node, (ast.Global, ast.Nonlocal)):
+        return
     if isinstance(node, ast.Assign):
         targets = node.targets
         if len(targets) == 1:
@@ -158,14 +310,14 @@ def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
         target = node.target
         if isinstance(target, ast.Name):
             name = target.id
-            if name in ctx.locals._by_name:
-                ctx.emitter.emit("LOAD_FAST", ctx.locals.index(name))
-            else:
-                ctx.emitter.emit("LOAD_GLOBAL", ctx.compiler.names.intern(name))
+            _emit_load_name(ctx, name)
             _compile_expr(ctx, node.value)
             ctx.emitter.emit(op)
-            _store_name(ctx, name)
+            _emit_store_name(ctx, name)
         elif isinstance(target, ast.Subscript):
+            if isinstance(target.slice, ast.Slice):
+                _compile_slice_augassign(ctx, op, target, node.value)
+                return
             _compile_expr(ctx, target.value)
             _compile_expr(ctx, target.slice)
             ctx.emitter.emit("DUP_TOP_TWO")
@@ -191,6 +343,7 @@ def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
             ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(None))
         else:
             _compile_expr(ctx, node.value)
+        _emit_active_finally(ctx, 0)
         ctx.emitter.emit("RETURN_VALUE")
         return
     if isinstance(node, ast.If):
@@ -207,6 +360,37 @@ def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
         ctx.emitter.label(end_label)
         return
 
+    if isinstance(node, ast.Try):
+        _compile_try(ctx, node)
+        return
+
+    if isinstance(node, ast.Raise):
+        if node.cause is not None:
+            raise CompileError("'raise ... from ...' is not supported yet")
+        if node.exc is None:
+            ctx.emitter.emit("RAISE_VARARGS", 0)
+            return
+        _compile_expr(ctx, node.exc)
+        ctx.emitter.emit("RAISE_VARARGS", 1)
+        return
+
+    if isinstance(node, ast.Assert):
+        end_label = ctx.emitter.new_label("assert_end")
+        _compile_expr(ctx, node.test)
+        ctx.emitter.emit_jump("POP_JUMP_IF_TRUE", end_label)
+
+        ctx.emitter.emit("LOAD_GLOBAL", ctx.compiler.names.intern("AssertionError"))
+
+        if node.msg is not None:
+            _compile_expr(ctx, node.msg)
+            ctx.emitter.emit("CALL_FUNCTION", 1)
+        else:
+            ctx.emitter.emit("CALL_FUNCTION", 0)
+
+        ctx.emitter.emit("RAISE_VARARGS", 1)
+        ctx.emitter.label(end_label)
+        return
+
     if isinstance(node, ast.While):
         start_label = ctx.emitter.new_label("while_start")
         else_label = ctx.emitter.new_label("while_else")
@@ -214,7 +398,9 @@ def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
         ctx.emitter.label(start_label)
         _compile_expr(ctx, node.test)
         ctx.emitter.emit_jump("POP_JUMP_IF_FALSE", else_label)
-        ctx.loop_stack.append((start_label, end_label))
+        ctx.loop_stack.append(
+            (start_label, end_label, ctx.handler_depth, ctx.except_depth, len(ctx.finally_stack))
+        )
         for s in node.body:
             _compile_stmt(ctx, s)
         ctx.loop_stack.pop()
@@ -248,7 +434,9 @@ def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
 
         _assign_to(ctx, target)
 
-        ctx.loop_stack.append((start_label, end_label))
+        ctx.loop_stack.append(
+            (start_label, end_label, ctx.handler_depth, ctx.except_depth, len(ctx.finally_stack))
+        )
 
         for s in node.body:
             _compile_stmt(ctx, s)
@@ -270,12 +458,18 @@ def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
     if isinstance(node, ast.Break):
         if not ctx.loop_stack:
             raise CompileError("break outside loop")
-        ctx.emitter.emit_jump("JUMP_ABSOLUTE", ctx.loop_stack[-1][1])
+        start, end, handlers, excepts, final_depth = ctx.loop_stack[-1]
+        _emit_active_finally(ctx, final_depth)
+        _emit_exit_cleanup(ctx, handlers, excepts)
+        ctx.emitter.emit_jump("JUMP_ABSOLUTE", end)
         return
     if isinstance(node, ast.Continue):
         if not ctx.loop_stack:
             raise CompileError("continue outside loop")
-        ctx.emitter.emit_jump("JUMP_ABSOLUTE", ctx.loop_stack[-1][0])
+        start, end, handlers, excepts, final_depth = ctx.loop_stack[-1]
+        _emit_active_finally(ctx, final_depth)
+        _emit_exit_cleanup(ctx, handlers, excepts)
+        ctx.emitter.emit_jump("JUMP_ABSOLUTE", start)
         return
     if isinstance(node, ast.Pass):
         ctx.emitter.emit("NOP")
@@ -283,14 +477,18 @@ def _compile_stmt(ctx: _FuncCtx, node: ast.stmt) -> None:
     raise CompileError(f"unsupported statement: {type(node).__name__}")
 
 def _compile_expr(ctx: _FuncCtx, node: ast.expr) -> None:
+    line = getattr(node, "lineno", None)
+    if line:
+        ctx.emitter.current_line = line
+
     if isinstance(node, ast.Constant):
         ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(node.value))
         return
     if isinstance(node, ast.Name):
-        if node.id in ctx.locals._by_name:
-            ctx.emitter.emit("LOAD_FAST", ctx.locals.index(node.id))
-        else:
-            ctx.emitter.emit("LOAD_GLOBAL", ctx.compiler.names.intern(node.id))
+        _emit_load_name(ctx, node.id)
+        return
+    if isinstance(node, ast.Lambda):
+        _emit_function_value(ctx, node)
         return
     if isinstance(node, ast.JoinedStr):
         _compile_joined_str(ctx, node)
@@ -424,6 +622,13 @@ def _compile_expr(ctx: _FuncCtx, node: ast.expr) -> None:
         ctx.emitter.emit("GET_INDEX")
         return
     if isinstance(node, ast.Call):
+        has_star = any(isinstance(arg, ast.Starred) for arg in node.args)
+        has_dstar = any(keyword.arg is None for keyword in node.keywords)
+
+        if has_star or has_dstar:
+            _compile_call_ex(ctx, node, has_star, has_dstar)
+            return
+
         for arg in node.args:
             if isinstance(arg, ast.Starred):
                 raise CompileError("argument unpacking with * is not supported yet")
@@ -478,16 +683,146 @@ _COMPREHENSIONS = {
     ast.DictComp: ("Dict", "BUILD_MAP", "MAP_ADD"),
 }
 
-def _compile_comprehension(ctx: _FuncCtx, node: ast.expr) -> None:
+def _compile_try(ctx: _FuncCtx, node: ast.Try) -> None:
+    handlers = node.handlers
+    has_finally = len(node.finalbody) > 0
+    has_handlers = len(handlers) > 0
+
+    end_label = ctx.emitter.new_label("try_end")
+    else_label = ctx.emitter.new_label("try_else")
+    normal_label = ctx.emitter.new_label("try_normal")
+
+    handler_labels = [ctx.emitter.new_label(f"except_{i}") for i in range(len(handlers))]
+    finally_label = ctx.emitter.new_label("try_finally") if has_finally else None
+
+    if has_finally:
+        ctx.handler_depth += 1
+        ctx.emitter.emit_jump("SETUP_HANDLER", finally_label)
+
+    if has_handlers:
+        ctx.handler_depth += 1
+        ctx.emitter.emit_jump("SETUP_HANDLER", handler_labels[0])
+
+    if has_finally:
+        ctx.finally_stack.append(node.finalbody)
+
+    for stmt in node.body:
+        _compile_stmt(ctx, stmt)
+
+    if has_handlers:
+        ctx.emitter.emit("POP_HANDLER")
+        ctx.handler_depth -= 1
+        ctx.emitter.emit_jump("JUMP_ABSOLUTE", else_label)
+
+        for index, handler in enumerate(handlers):
+            ctx.emitter.label(handler_labels[index])
+            skip_label = None
+
+            if handler.type is not None:
+                skip_label = ctx.emitter.new_label(f"except_next_{index}")
+                ctx.emitter.emit("DUP_TOP")
+                _compile_expr(ctx, handler.type)
+                ctx.emitter.emit("EXCEPT_MATCH")
+                ctx.emitter.emit_jump("POP_JUMP_IF_FALSE", skip_label)
+
+            if handler.name:
+                ctx.emitter.emit("DUP_TOP")
+                _emit_store_name(ctx, handler.name)
+
+            ctx.except_depth += 1
+            for stmt in handler.body:
+                _compile_stmt(ctx, stmt)
+            ctx.except_depth -= 1
+
+            ctx.emitter.emit("EXCEPT_CLEAR")
+            ctx.emitter.emit_jump("JUMP_ABSOLUTE", normal_label)
+
+            if skip_label is not None:
+                ctx.emitter.label(skip_label)
+
+        ctx.emitter.emit("RERAISE")
+
+    ctx.emitter.label(else_label)
+
+    for stmt in node.orelse:
+        _compile_stmt(ctx, stmt)
+
+    if has_finally:
+        ctx.finally_stack.pop()
+
+    ctx.emitter.label(normal_label)
+
+    if has_finally:
+        ctx.emitter.emit("POP_HANDLER")
+        ctx.handler_depth -= 1
+
+        for stmt in node.finalbody:
+            _compile_stmt(ctx, stmt)
+
+        ctx.emitter.emit_jump("JUMP_ABSOLUTE", end_label)
+        ctx.emitter.label(finally_label)
+
+        for stmt in node.finalbody:
+            _compile_stmt(ctx, stmt)
+
+        ctx.emitter.emit("RERAISE")
+
+    ctx.emitter.label(end_label)
+
+def _compile_closure(ctx: _FuncCtx, node) -> None:
+    child = ctx.compiler.analyzer.scope_for(node)
+
+    for name in child.frees:
+        kind, slot = ctx.locals.resolve(name)
+        if kind not in ("cell", "free"):
+            raise CompileError(f"closure over non-cell {name!r}")
+        ctx.emitter.emit("LOAD_CLOSURE", slot)
+
+    ctx.emitter.emit("BUILD_TUPLE", len(child.frees))
+
+def _emit_function_value(ctx: _FuncCtx, node) -> None:
+    index = ctx.compiler._func_index[id(node)]
+    args = node.args
+
+    for default in args.defaults:
+        _compile_expr(ctx, default)
+    ctx.emitter.emit("BUILD_TUPLE", len(args.defaults))
+
+    provided = 0
+    for arg, default in zip(args.kwonlyargs, args.kw_defaults):
+        if default is None:
+            continue
+        ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(arg.arg))
+        _compile_expr(ctx, default)
+        provided += 1
+    ctx.emitter.emit("BUILD_MAP", provided)
+
+    _compile_closure(ctx, node)
+    ctx.emitter.emit("MAKE_FUNCTION", index)
+
+def _compile_function_def(ctx: _FuncCtx, node) -> None:
+    decorators = []
+
+    for decorator in node.decorator_list:
+        _compile_expr(ctx, decorator)
+        ctx.temp_seq += 1
+        slot = ctx.locals.declare(f"__decorator_{ctx.temp_seq}")
+        ctx.emitter.emit("STORE_FAST", slot)
+        decorators.append(slot)
+
+    _emit_function_value(ctx, node)
+
+    for slot in reversed(decorators):
+        ctx.emitter.emit("LOAD_FAST", slot)
+        ctx.emitter.emit("ROT_TWO")
+        ctx.emitter.emit("CALL_FUNCTION", 1)
+
+    _emit_store_name(ctx, node.name)
+
+def _compile_comprehension_body(ctx: _FuncCtx, node) -> None:
     kind, build_op, add_op = _COMPREHENSIONS[type(node)]
     generators = node.generators
-    for gen in generators:
-        if gen.is_async:
-            raise CompileError(f"async {kind.lower()} comprehensions are not supported")
-
-    ctx.iter_depth += 1
-    depth = ctx.iter_depth
-    result_idx = ctx.locals.declare(f"__comp_result_{depth}")
+    result_idx = ctx.locals.declare("__comp_result")
 
     ctx.emitter.emit(build_op, 0)
     ctx.emitter.emit("STORE_FAST", result_idx)
@@ -506,15 +841,22 @@ def _compile_comprehension(ctx: _FuncCtx, node: ast.expr) -> None:
             emit_body()
             return
         gen = generators[i]
-        iter_idx = ctx.locals.declare(f"__comp_iter_{depth}_{i}")
-        _compile_expr(ctx, gen.iter)
-        ctx.emitter.emit("GET_ITER")
-        ctx.emitter.emit("STORE_FAST", iter_idx)
+        end_label = ctx.emitter.new_label(f"comp_end_{i}")
 
-        start_label = ctx.emitter.new_label(f"comp_for_{depth}_{i}")
-        end_label = ctx.emitter.new_label(f"comp_end_{depth}_{i}")
+        if i > 0:
+            iter_idx = ctx.locals.declare(f"__comp_iter_{i}")
+            _compile_expr(ctx, gen.iter)
+            ctx.emitter.emit("GET_ITER")
+            ctx.emitter.emit("STORE_FAST", iter_idx)
+
+        start_label = ctx.emitter.new_label(f"comp_for_{i}")
         ctx.emitter.label(start_label)
-        ctx.emitter.emit("LOAD_FAST", iter_idx)
+
+        if i == 0:
+            ctx.emitter.emit("LOAD_FAST", 0)
+        else:
+            ctx.emitter.emit("LOAD_FAST", iter_idx)
+
         ctx.emitter.emit_jump("FOR_ITER", end_label)
         _assign_to(ctx, gen.target)
 
@@ -529,7 +871,76 @@ def _compile_comprehension(ctx: _FuncCtx, node: ast.expr) -> None:
     emit_generator(0)
 
     ctx.emitter.emit("LOAD_FAST", result_idx)
-    ctx.iter_depth -= 1
+    ctx.emitter.emit("RETURN_VALUE")
+
+def _compile_comprehension(ctx: _FuncCtx, node) -> None:
+    index = ctx.compiler._func_index[id(node)]
+    generator = node.generators[0]
+
+    ctx.temp_seq += 1
+    iter_idx = ctx.locals.declare(f"__comp_iter_{ctx.temp_seq}")
+    _compile_expr(ctx, generator.iter)
+    ctx.emitter.emit("GET_ITER")
+    ctx.emitter.emit("STORE_FAST", iter_idx)
+
+    ctx.emitter.emit("BUILD_TUPLE", 0)
+    ctx.emitter.emit("BUILD_MAP", 0)
+    _compile_closure(ctx, node)
+    ctx.emitter.emit("MAKE_FUNCTION", index)
+
+    ctx.emitter.emit("LOAD_FAST", iter_idx)
+    ctx.emitter.emit("CALL_FUNCTION", 1)
+
+def _compile_call_ex(ctx: _FuncCtx, node, has_star, has_dstar) -> None:
+    if isinstance(node.func, ast.Attribute):
+        raise CompileError("argument unpacking in method calls is not supported yet")
+
+    named = []
+    for keyword in node.keywords:
+        if keyword.arg is not None:
+            if keyword.arg in named:
+                raise CompileError(f"duplicate keyword argument: {keyword.arg}")
+            named.append(keyword.arg)
+
+    ctx.temp_seq += 1
+    tag = ctx.temp_seq
+    args_idx = ctx.locals.declare(f"__call_args_{tag}")
+    kwargs_idx = ctx.locals.declare(f"__call_kwargs_{tag}")
+
+    ctx.emitter.emit("BUILD_LIST", 0)
+    ctx.emitter.emit("STORE_FAST", args_idx)
+
+    for arg in node.args:
+        ctx.emitter.emit("LOAD_FAST", args_idx)
+        if isinstance(arg, ast.Starred):
+            _compile_expr(ctx, arg.value)
+            ctx.emitter.emit("LIST_EXTEND")
+        else:
+            _compile_expr(ctx, arg)
+            ctx.emitter.emit("LIST_APPEND")
+
+    ctx.emitter.emit("BUILD_MAP", 0)
+    ctx.emitter.emit("STORE_FAST", kwargs_idx)
+
+    for keyword in node.keywords:
+        ctx.emitter.emit("LOAD_FAST", kwargs_idx)
+        if keyword.arg is None:
+            _compile_expr(ctx, keyword.value)
+            ctx.emitter.emit("DICT_MERGE")
+        elif has_dstar:
+            ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(keyword.arg))
+            _compile_expr(ctx, keyword.value)
+            ctx.emitter.emit("BUILD_MAP", 1)
+            ctx.emitter.emit("DICT_MERGE")
+        else:
+            ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(keyword.arg))
+            _compile_expr(ctx, keyword.value)
+            ctx.emitter.emit("MAP_ADD")
+
+    _compile_expr(ctx, node.func)
+    ctx.emitter.emit("LOAD_FAST", args_idx)
+    ctx.emitter.emit("LOAD_FAST", kwargs_idx)
+    ctx.emitter.emit("CALL_EX")
 
 def _constant_default(node: ast.expr):
     if isinstance(node, ast.Constant):
@@ -547,19 +958,13 @@ def _constant_default(node: ast.expr):
         return tuple(_constant_default(elt) for elt in node.elts)
     raise CompileError("default values must be constant expressions")
 
-def _is_local_target(ctx: _FuncCtx, name: str) -> bool:
-    return not ctx.is_module
-
-def _store_name(ctx: _FuncCtx, name: str) -> None:
-    if name in ctx.locals._by_name or _is_local_target(ctx, name):
-        idx = ctx.locals.declare(name)
-        ctx.emitter.emit("STORE_FAST", idx)
-    else:
-        idx = ctx.compiler.names.intern(name)
-        ctx.emitter.emit("STORE_GLOBAL", idx)
-
 def _assign_single(ctx: _FuncCtx, target, value_node) -> None:
     if isinstance(target, ast.Subscript):
+        if isinstance(target.slice, ast.Slice):
+            _compile_expr(ctx, value_node)
+            _emit_slice_target(ctx, target)
+            ctx.emitter.emit("STORE_SLICE")
+            return
         _compile_expr(ctx, target.value)
         _compile_expr(ctx, target.slice)
         _compile_expr(ctx, value_node)
@@ -568,10 +973,58 @@ def _assign_single(ctx: _FuncCtx, target, value_node) -> None:
         _compile_expr(ctx, value_node)
         _assign_to(ctx, target)
 
+def _emit_slice_parts(ctx: _FuncCtx, node) -> None:
+    for part in (node.lower, node.upper, node.step):
+        if part is None:
+            ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(None))
+        else:
+            _compile_expr(ctx, part)
+
+def _emit_slice_target(ctx: _FuncCtx, target) -> None:
+    _compile_expr(ctx, target.value)
+    _emit_slice_parts(ctx, target.slice)
+
+def _store_slice_part(ctx: _FuncCtx, node, idx: int) -> None:
+    if node is None:
+        ctx.emitter.emit("LOAD_CONST", ctx.compiler.constants.add(None))
+    else:
+        _compile_expr(ctx, node)
+    ctx.emitter.emit("STORE_FAST", idx)
+
+def _compile_slice_augassign(ctx: _FuncCtx, op: str, target, value_node) -> None:
+    ctx.temp_seq += 1
+    tag = ctx.temp_seq
+
+    obj_idx = ctx.locals.declare(f"__slice_obj_{tag}")
+    start_idx = ctx.locals.declare(f"__slice_start_{tag}")
+    stop_idx = ctx.locals.declare(f"__slice_stop_{tag}")
+    step_idx = ctx.locals.declare(f"__slice_step_{tag}")
+
+    _compile_expr(ctx, target.value)
+    ctx.emitter.emit("STORE_FAST", obj_idx)
+    _store_slice_part(ctx, target.slice.lower, start_idx)
+    _store_slice_part(ctx, target.slice.upper, stop_idx)
+    _store_slice_part(ctx, target.slice.step, step_idx)
+
+    for idx in (obj_idx, start_idx, stop_idx, step_idx):
+        ctx.emitter.emit("LOAD_FAST", idx)
+    ctx.emitter.emit("GET_SLICE")
+
+    _compile_expr(ctx, value_node)
+    ctx.emitter.emit(op)
+
+    for idx in (obj_idx, start_idx, stop_idx, step_idx):
+        ctx.emitter.emit("LOAD_FAST", idx)
+    ctx.emitter.emit("STORE_SLICE")
+
 def _assign_to(ctx: _FuncCtx, target) -> None:
     if isinstance(target, ast.Name):
-        _store_name(ctx, target.id)
+        _emit_store_name(ctx, target.id)
     elif isinstance(target, ast.Subscript):
+        if isinstance(target.slice, ast.Slice):
+            _emit_slice_target(ctx, target)
+            ctx.emitter.emit("STORE_SLICE")
+            return
         _compile_expr(ctx, target.value)
         _compile_expr(ctx, target.slice)
         ctx.emitter.emit("ROT_THREE")
@@ -615,14 +1068,12 @@ def _compile_joined_str(ctx: _FuncCtx, node) -> None:
 
 def _compile_delete(ctx: _FuncCtx, target) -> None:
     if isinstance(target, ast.Name):
-        name = target.id
-        if name in ctx.locals._by_name or _is_local_target(ctx, name):
-            idx = ctx.locals.declare(name)
-            ctx.emitter.emit("DELETE_FAST", idx)
-        else:
-            idx = ctx.compiler.names.intern(name)
-            ctx.emitter.emit("DELETE_GLOBAL", idx)
+        _emit_delete_name(ctx, target.id)
     elif isinstance(target, ast.Subscript):
+        if isinstance(target.slice, ast.Slice):
+            _emit_slice_target(ctx, target)
+            ctx.emitter.emit("DELETE_SLICE")
+            return
         _compile_expr(ctx, target.value)
         _compile_expr(ctx, target.slice)
         ctx.emitter.emit("DELETE_SUBSCR")

@@ -42,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
             compiled.constants,
             compiled.names,
             entry_function="__main__",
+            source_name=compiled.source_name,
         )
         container = encode_container(plain, pepper_id=1, flags=0)
     except (

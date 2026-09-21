@@ -1,0 +1,8 @@
+print(format(255, "_x"), format(255, "_b"), format(255, "_o"), format(255, "_X"), format(0, "_x"))
+print(format(123456789, "_x"), format(123456789, "_b"), format(123456789, "_o"), format(123456789, "_X"))
+print(format(-123456789, "_x"), format(1234567890123456789, "_d"), format(255, "_d"), format(-1, "_d"))
+print(format(255, "#_x"), format(4095, "#_x"), format(255, "010_x"), format(123456789, "+_x"), format(123456789, "_x"))
+print(f"{123456789:_x}", f"{255:_b}", f"{255:_o}", f"{4095:_X}", f"{123456789:_d}")
+print(format(1234.5678, "_.2f"), format(1234.5678, "_.2e"), format(1234.5678, "_.5g"))
+print(format(1234.5678, ",.2f"), format(1234567.5, "_f"), format(12.5, "_f"), format(-1234.5, "_.1f"))
+print(format(1, "_x"), format(16, "_x"), format(65536, "_x"), format(1048575, "_x"))

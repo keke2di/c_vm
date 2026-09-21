@@ -24,6 +24,13 @@ class Emitter:
     labels: Dict[str, int] = field(default_factory=dict)
     fixups: List[_Fixup] = field(default_factory=list)
     label_counters: Dict[str, int] = field(default_factory=dict)
+    line_table: List[tuple] = field(default_factory=list)
+    current_line: int = 1
+
+    def _record_line(self) -> None:
+        offset = len(self.code)
+        if not self.line_table or self.line_table[-1][1] != self.current_line:
+            self.line_table.append((offset, self.current_line))
 
     def pos(self) -> int:
         return len(self.code)
@@ -49,6 +56,7 @@ class Emitter:
     def emit(self, mnemonic: str, operand: Optional[int] = None) -> None:
         if mnemonic not in OPCODES:
             raise EmitterError(f"unknown opcode {mnemonic!r}")
+        self._record_line()
         op = OPCODES[mnemonic]
         width = OPERAND_WIDTH(op)
         self.code.append(op)
@@ -63,6 +71,7 @@ class Emitter:
     def emit_jump(self, mnemonic: str, label: str) -> None:
         if mnemonic not in OPCODES:
             raise EmitterError(f"unknown opcode {mnemonic!r}")
+        self._record_line()
         op = OPCODES[mnemonic]
         width = OPERAND_WIDTH(op)
         if width not in (2, 4):

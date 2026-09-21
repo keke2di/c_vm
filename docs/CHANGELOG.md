@@ -10,11 +10,43 @@ description: "Changes in each cVM release."
 Changes in each cVM release.
 {: .fs-6 .fw-300 }
 
-## v0.3.0
+## v0.4.0
 {: .d-inline-block }
 
 Latest
 {: .label .label-green }
+
+Functions, scopes, and exceptions. Programs can now define closures and decorators, take every parameter kind Python has, recover from failures with `try`/`except`/`finally`, and print CPython-shaped tracebacks. Containers also became smaller and faster to look up: `dict` and `set` are O(1) and every public type matches CPython's `hash()`.
+
+### Added
+
+- **Exceptions.** 68 built-in exception types with CPython's hierarchy (plus the `EnvironmentError`, `IOError`, and `WindowsError` aliases of `OSError`), `raise` (including bare re-raise), `try`/`except`/`else`/`finally`, `except ... as name`, bare `except`, and `assert`. A `return`, `break`, or `continue` that leaves a `finally` block runs it first, and a `return` inside `finally` overrides.
+- **Tracebacks.** An unhandled exception prints `Traceback (most recent call last):`, one `File "…", line N, in name` line per frame, and the exception line. Per-function line tables and a source-file section back this.
+- **Runtime failures are exceptions.** Every internal failure now raises the exception CPython raises: `TypeError`, `ValueError`, `KeyError`, `IndexError`, `AttributeError`, `ZeroDivisionError`, `OverflowError`, `LookupError`, `UnicodeError`, `StopIteration`, `RuntimeError`, `RecursionError`, `MemoryError`, and `NameError`/`UnboundLocalError` for undefined or unbound names.
+- **Functions and scopes.** Nested `def`, `lambda`, closures over enclosing variables, `nonlocal` and `global`, decorators, every parameter kind (positional-only, positional-or-keyword, `*args`, keyword-only, `**kwargs`), default values that are arbitrary expressions evaluated at definition time, call-site unpacking (`f(*items, **mapping)`), and comprehensions that run as real hidden functions with their own scope.
+- **`hash()` and O(1) containers.** `hash()` matches CPython for `int`, `float`, `bool`, `None`, `str`, `bytes`, `tuple`, and `range` (identical under `PYTHONHASHSEED=0`), while `dict` and `set` keep insertion order and gain open-addressed index tables, so lookups are O(1).
+- **Slice assignment and deletion** (`a[i:j] = …`, `del a[i:j]`, stepped forms, and augmented assignment to a slice).
+- **Type objects.** `zip`, `map`, `filter`, `enumerate`, and `reversed` are classes; iterators report CPython's per-kind type names; `object` is the root type with `object()` instances; and `issubclass` understands `bool`/`int` and the exception hierarchy. Function, iterator, and instance reprs carry real addresses.
+- **Grouping for every base** in f-strings and `format` (`f"{n:_x}"` groups every four digits), including combined with zero fill.
+
+### Changed
+
+- `def` statements now run in order, as in Python: calling a function before its `def` line executes is an error, and redefining one works.
+- An unassigned local or cell read raises `UnboundLocalError` instead of stopping the VM with an internal stack error.
+- Set and `dict`-view iteration still follow insertion order; `frozenset` hashes are cVM's own order-independent values rather than CPython's.
+
+### Compatibility
+
+{: .important }
+**Recompile required.** The container format moved from version 3 to **version 5** and the opcode table from 8 to **11**, so modules compiled by v0.3.0 or earlier do not load. Packed executables are unaffected because each one carries its own runtime.
+
+Runtime failures that used to print `VM run error: <kind>` now raise exceptions with tracebacks, and their messages are generic rather than CPython's exact text. `e.args` and other exception attributes need attribute access, which arrives with classes in v0.5.
+
+## v0.3.0
+{: .d-inline-block }
+
+Released
+{: .label }
 
 Complete `str` and `bytes` method surfaces, backed by generated Unicode tables. Every public method of `str`, `bytes`, `list`, `dict`, `set`, and `frozenset` is now implemented — 136 in total — and matches CPython 3.14 for the supported argument forms.
 

@@ -14,16 +14,39 @@ struct FuncEntry {
     uint32_t code_offset;
     uint32_t locals_count;
     uint32_t params_count;
+    uint32_t posonly_count;
     uint32_t defaults_count;
+    uint32_t kwonly_count;
+    uint32_t vararg_slot;
+    uint32_t kwarg_slot;
+    uint32_t cells_count;
+    uint32_t frees_count;
     uint32_t *param_names;
-    uint32_t *default_consts;
+    uint32_t *kwonly_names;
+    uint16_t *kwonly_slots;
+    uint8_t *kwonly_flags;
+    uint16_t *cell_slots;
+    uint32_t *free_names;
+    uint32_t *line_offsets;
+    uint32_t *line_numbers;
+    uint32_t line_count;
 };
+
+typedef struct {
+    uint32_t target;
+    uint32_t stack_top;
+} Handler;
 
 struct Frame {
     Frame *prev;
     uint8_t *return_ip;
     Value **locals;
     uint32_t locals_cap;
+    Value **cells;
+    uint32_t cells_cap;
+    Handler *handlers;
+    uint32_t handler_count;
+    uint32_t handler_cap;
     FuncEntry *func;
     uint32_t stack_base;
 };
@@ -46,6 +69,8 @@ struct VM {
     uint32_t entry_func_index;
 
     uint8_t *ip;
+    Value *exception;
+    char *source_name;
     Value **stack;
     uint32_t stack_cap;
     uint32_t stack_top;
@@ -77,10 +102,14 @@ struct VM {
 #define VM_ERR_RUNTIME   -16
 #define VM_ERR_LOOKUP    -17
 #define VM_ERR_UNICODE   -18
+#define VM_ERR_RECURSION -19
+#define VM_ERR_RAISED    -20
 
 int vm_load_memory(VM *vm, const uint8_t *data, size_t len);
 
 int vm_run(VM *vm);
+
+int vm_report_error(VM *vm, int is_load_error);
 
 void vm_free(VM *vm);
 

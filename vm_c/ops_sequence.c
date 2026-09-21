@@ -311,7 +311,7 @@ void op_get_index(VM *vm) {
             if (found) {
                 vm_push(vm, found);
             } else {
-                vm->last_error = VM_ERR_KEY;
+                vm_fail_with_value(vm, "KeyError", idx_val);
             }
         }
     } else if (!int_like(idx_val)) {
@@ -601,6 +601,184 @@ void op_set_index(VM *vm) {
     value_release(container);
 }
 
+static int slice_step_value(const Value *step_val, int64_t *step_out) {
+    if (!(step_val->tag == TAG_NONE || int_like(step_val))) return 1;
+
+    int64_t step = int_like(step_val) ? step_val->data.int_val : 1;
+    if (step == 0) return 2;
+    if (step == INT64_MIN) step = -INT64_MAX;
+
+    *step_out = step;
+    return 0;
+}
+
+static int list_replace_range(Value *list, int64_t start, int64_t count, Value *items) {
+    uint32_t old_len = list->data.list.len;
+    uint32_t new_count = items ? items->data.list.len : 0;
+    uint64_t total = (uint64_t)old_len - (uint64_t)count + (uint64_t)new_count;
+
+    if (total > UINT32_MAX) return -1;
+
+    if (list->data.list.cap < total) {
+        uint32_t cap = list->data.list.cap == 0 ? 4 : list->data.list.cap;
+        while (cap < total) cap *= 2;
+
+        Value **grown = realloc(list->data.list.items, cap * sizeof(Value *));
+        if (!grown) return -1;
+
+        list->data.list.items = grown;
+        list->data.list.cap = cap;
+    }
+
+    Value **array = list->data.list.items;
+    uint32_t begin = (uint32_t)start;
+    uint32_t removed = (uint32_t)count;
+
+    for (uint32_t i = 0; i < removed; i++) {
+        value_release(array[begin + i]);
+    }
+
+    memmove(&array[begin + new_count], &array[begin + removed],
+            (old_len - begin - removed) * sizeof(Value *));
+
+    for (uint32_t i = 0; i < new_count; i++) {
+        array[begin + i] = value_retain(items->data.list.items[i]);
+    }
+
+    list->data.list.len = (uint32_t)total;
+    return 0;
+}
+
+void op_store_slice(VM *vm) {
+    Value *step_val = vm_pop(vm);
+    Value *stop_val = vm_pop(vm);
+    Value *start_val = vm_pop(vm);
+    Value *container = vm_pop(vm);
+    Value *value = vm_pop(vm);
+
+    int failed = 0;
+    int64_t step = 1;
+    int64_t start = 0;
+    int64_t count = 0;
+
+    if (!step_val || !stop_val || !start_val || !container || !value) {
+        vm->last_error = VM_ERR_STACK;
+        failed = 1;
+    } else if (container->tag != TAG_LIST) {
+        vm->last_error = VM_ERR_TYPE;
+        failed = 1;
+    } else if (!(start_val->tag == TAG_NONE || int_like(start_val)) ||
+               !(stop_val->tag == TAG_NONE || int_like(stop_val))) {
+        vm->last_error = VM_ERR_TYPE;
+        failed = 1;
+    } else {
+        int rc = slice_step_value(step_val, &step);
+
+        if (rc == 1) {
+            vm->last_error = VM_ERR_TYPE;
+            failed = 1;
+        } else if (rc == 2) {
+            vm->last_error = VM_ERR_VALUE;
+            failed = 1;
+        }
+    }
+
+    if (!failed) {
+        adjust_slice(start_val, stop_val, step, container->data.list.len, &start, &count);
+
+        Value *items = value_list_from_iterable(vm, value);
+
+        if (!items) {
+            failed = 1;
+        } else if (step == 1) {
+            if (list_replace_range(container, start, count, items) != 0) {
+                vm->last_error = VM_ERR_OOM;
+            }
+        } else if ((int64_t)items->data.list.len != count) {
+            vm->last_error = VM_ERR_VALUE;
+        } else {
+            for (int64_t i = 0; i < count; i++) {
+                value_list_set(container, (size_t)(start + i * step),
+                               items->data.list.items[i]);
+            }
+        }
+
+        if (items) value_release(items);
+    }
+
+    if (value) value_release(value);
+    if (container) value_release(container);
+    if (start_val) value_release(start_val);
+    if (stop_val) value_release(stop_val);
+    if (step_val) value_release(step_val);
+}
+
+void op_delete_slice(VM *vm) {
+    Value *step_val = vm_pop(vm);
+    Value *stop_val = vm_pop(vm);
+    Value *start_val = vm_pop(vm);
+    Value *container = vm_pop(vm);
+
+    int failed = 0;
+    int64_t step = 1;
+    int64_t start = 0;
+    int64_t count = 0;
+
+    if (!step_val || !stop_val || !start_val || !container) {
+        vm->last_error = VM_ERR_STACK;
+        failed = 1;
+    } else if (container->tag != TAG_LIST) {
+        vm->last_error = VM_ERR_TYPE;
+        failed = 1;
+    } else if (!(start_val->tag == TAG_NONE || int_like(start_val)) ||
+               !(stop_val->tag == TAG_NONE || int_like(stop_val))) {
+        vm->last_error = VM_ERR_TYPE;
+        failed = 1;
+    } else {
+        int rc = slice_step_value(step_val, &step);
+
+        if (rc == 1) {
+            vm->last_error = VM_ERR_TYPE;
+            failed = 1;
+        } else if (rc == 2) {
+            vm->last_error = VM_ERR_VALUE;
+            failed = 1;
+        }
+    }
+
+    if (!failed) {
+        adjust_slice(start_val, stop_val, step, container->data.list.len, &start, &count);
+
+        if (step == 1 || count == 0) {
+            if (count > 0 && list_replace_range(container, start, count, NULL) != 0) {
+                vm->last_error = VM_ERR_OOM;
+            }
+        } else {
+            Value **array = container->data.list.items;
+            uint32_t old_len = container->data.list.len;
+            int64_t next = step > 0 ? 0 : count - 1;
+            int64_t direction = step > 0 ? 1 : -1;
+            uint32_t write = 0;
+
+            for (uint32_t i = 0; i < old_len; i++) {
+                if (next >= 0 && next < count && (int64_t)i == start + next * step) {
+                    value_release(array[i]);
+                    next += direction;
+                } else {
+                    array[write++] = array[i];
+                }
+            }
+
+            container->data.list.len = write;
+        }
+    }
+
+    if (container) value_release(container);
+    if (start_val) value_release(start_val);
+    if (stop_val) value_release(stop_val);
+    if (step_val) value_release(step_val);
+}
+
 void op_len(VM *vm) {
     Value *v = vm_pop(vm);
     if (!v) return;
@@ -643,7 +821,7 @@ void op_delete_index(VM *vm) {
         if (!value_is_hashable(idx)) {
             vm->last_error = VM_ERR_TYPE;
         } else if (!value_dict_delete(container, idx)) {
-            vm->last_error = VM_ERR_KEY;
+            vm_fail_with_value(vm, "KeyError", idx);
         }
     } else {
         vm->last_error = VM_ERR_TYPE;

@@ -235,6 +235,84 @@ Value *iterator_next(VM *vm, Value *iter) {
     }
 }
 
+int value_list_extend(VM *vm, Value *list, const Value *iterable) {
+    Value *iter = value_make_iter(vm, iterable);
+    if (!iter) return -1;
+
+    for (;;) {
+        Value *item = iterator_next(vm, iter);
+        if (!item) break;
+
+        int rc = value_list_append(list, item);
+        value_release(item);
+
+        if (rc != 0) {
+            value_release(iter);
+            vm->last_error = VM_ERR_OOM;
+            return -1;
+        }
+    }
+
+    value_release(iter);
+    return vm->last_error == VM_ERR_OK ? 0 : -1;
+}
+
+void op_list_extend(VM *vm) {
+    Value *iterable = vm_pop(vm);
+    Value *list = vm_pop(vm);
+
+    if (!iterable || !list) {
+        if (iterable) value_release(iterable);
+        if (list) value_release(list);
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    if (list->tag != TAG_LIST) {
+        vm->last_error = VM_ERR_TYPE;
+    } else {
+        value_list_extend(vm, list, iterable);
+    }
+
+    value_release(iterable);
+    value_release(list);
+}
+
+void op_dict_merge(VM *vm) {
+    Value *other = vm_pop(vm);
+    Value *target = vm_pop(vm);
+
+    if (!other || !target) {
+        if (other) value_release(other);
+        if (target) value_release(target);
+        vm->last_error = VM_ERR_STACK;
+        return;
+    }
+
+    if (target->tag != TAG_DICT || other->tag != TAG_DICT) {
+        vm->last_error = VM_ERR_TYPE;
+    } else {
+        for (uint32_t i = 0; i < other->data.dict.len; i++) {
+            Value *key = other->data.dict.entries[i].key;
+            Value *value = other->data.dict.entries[i].value;
+
+            if (value_dict_get(target, key) != NULL) {
+                vm->last_error = VM_ERR_TYPE;
+                break;
+            }
+
+            int rc = value_dict_set(target, key, value);
+            if (rc != 0) {
+                vm->last_error = insert_error(rc);
+                break;
+            }
+        }
+    }
+
+    value_release(other);
+    value_release(target);
+}
+
 Value *value_list_from_iterable(VM *vm, const Value *iterable) {
     Value *iter = value_make_iter(vm, iterable);
     if (!iter) return NULL;

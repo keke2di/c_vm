@@ -45,13 +45,12 @@ int main(void) {
     free(exe_data);
 
     if (err != VM_ERR_OK) {
-        fprintf(stderr, "VM load error: %s\n", vm_error_string(&vm));
-        return 1;
+        return vm_report_error(&vm, 1);
     }
 
     err = vm_run(&vm);
     if (err != VM_ERR_OK) {
-        fprintf(stderr, "VM run error: %s\n", vm_error_string(&vm));
+        vm_report_error(&vm, 0);
         vm_free(&vm);
         return 1;
     }

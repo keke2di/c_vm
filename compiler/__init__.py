@@ -2,7 +2,7 @@ from .compiler import CompileError, compile_source, Compiler, CompiledModule
 from .constants import ConstantPool
 from .crypto import FORMAT_VERSION, MAGIC, encode_container
 from .module import build_module
-from .symbols import GlobalNames, LocalTable, SymbolError
+from .symbols import GlobalNames, Scope, ScopeAnalyzer, SymbolError
 
 __all__ = [
     "CompileError",
@@ -15,8 +15,9 @@ __all__ = [
     "encode_container",
     "build_module",
     "GlobalNames",
-    "LocalTable",
+    "Scope",
+    "ScopeAnalyzer",
     "SymbolError",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
